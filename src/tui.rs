@@ -3,17 +3,18 @@ use crate::notes::{self, Note};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::{execute};
-use ratatui::layout::{Constraint, Direction, Layout};
+use crossterm::execute;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::DefaultTerminal;
 use std::io::stdout;
 
 enum Mode {
     Browse,
     Search,
+    Help,
 }
 
 struct App {
@@ -23,6 +24,7 @@ struct App {
     search_query: String,
     mode: Mode,
     should_quit: bool,
+    confirm_delete: bool,
 }
 
 impl App {
@@ -39,6 +41,7 @@ impl App {
             search_query: String::new(),
             mode: Mode::Browse,
             should_quit: false,
+            confirm_delete: false,
         }
     }
 
@@ -126,10 +129,31 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('/') => {
                         app.mode = Mode::Search;
                     }
+                    KeyCode::Char('?') => {
+                        app.mode = Mode::Help;
+                    }
+                    KeyCode::Char('d') => {
+                        if app.selected_note().is_some() {
+                            app.confirm_delete = true;
+                        }
+                    }
+                    KeyCode::Char('y') if app.confirm_delete => {
+                        if let Some(note) = app.selected_note() {
+                            let name = note.name.clone();
+                            let _ = notes::delete_note(&name);
+                            if let Ok(refreshed) = notes::list_notes(None) {
+                                app.notes = refreshed;
+                                app.apply_filter();
+                            }
+                        }
+                        app.confirm_delete = false;
+                    }
+                    KeyCode::Char('n') if app.confirm_delete => {
+                        app.confirm_delete = false;
+                    }
                     KeyCode::Enter => {
                         if let Some(note) = app.selected_note() {
                             let name = note.name.clone();
-                            // Restore terminal for editor
                             ratatui::restore();
                             execute!(stdout(), LeaveAlternateScreen)?;
                             terminal::disable_raw_mode()?;
@@ -144,13 +168,16 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                                 }
                             }
 
-                            // Re-enter TUI
                             terminal::enable_raw_mode()?;
                             execute!(stdout(), EnterAlternateScreen)?;
                             *terminal = ratatui::init();
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if app.confirm_delete {
+                            app.confirm_delete = false;
+                        }
+                    }
                 },
                 Mode::Search => match key.code {
                     KeyCode::Esc => {
@@ -168,6 +195,12 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char(c) => {
                         app.search_query.push(c);
                         app.apply_filter();
+                    }
+                    _ => {}
+                },
+                Mode::Help => match key.code {
+                    KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {
+                        app.mode = Mode::Browse;
                     }
                     _ => {}
                 },
@@ -196,18 +229,18 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     let search_text = if app.search_query.is_empty() {
         match app.mode {
             Mode::Search => String::from("_"),
-            Mode::Browse => String::from("Press / to search"),
+            Mode::Browse | Mode::Help => String::from("Press / to search"),
         }
     } else {
         match app.mode {
             Mode::Search => format!("{}_", app.search_query),
-            Mode::Browse => app.search_query.clone(),
+            Mode::Browse | Mode::Help => app.search_query.clone(),
         }
     };
 
     let search_style = match app.mode {
         Mode::Search => Style::default().fg(Color::Yellow),
-        Mode::Browse => Style::default().fg(Color::DarkGray),
+        Mode::Browse | Mode::Help => Style::default().fg(Color::DarkGray),
     };
 
     let search = Paragraph::new(search_text)
@@ -243,15 +276,90 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
 
     // Status bar
-    let status = Line::from(vec![
-        Span::styled(" ↑↓/jk", Style::default().fg(Color::Cyan)),
-        Span::raw(" navigate  "),
-        Span::styled("⏎", Style::default().fg(Color::Cyan)),
-        Span::raw(" edit  "),
-        Span::styled("/", Style::default().fg(Color::Cyan)),
-        Span::raw(" search  "),
-        Span::styled("q", Style::default().fg(Color::Cyan)),
-        Span::raw(" quit"),
-    ]);
+    let status = if app.confirm_delete {
+        Line::from(vec![
+            Span::styled(" Delete note? ", Style::default().fg(Color::Red)),
+            Span::styled("y", Style::default().fg(Color::Cyan)),
+            Span::raw(" yes  "),
+            Span::styled("n", Style::default().fg(Color::Cyan)),
+            Span::raw(" no"),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(" ↑↓/jk", Style::default().fg(Color::Cyan)),
+            Span::raw(" navigate  "),
+            Span::styled("⏎", Style::default().fg(Color::Cyan)),
+            Span::raw(" edit  "),
+            Span::styled("d", Style::default().fg(Color::Cyan)),
+            Span::raw(" delete  "),
+            Span::styled("/", Style::default().fg(Color::Cyan)),
+            Span::raw(" search  "),
+            Span::styled("?", Style::default().fg(Color::Cyan)),
+            Span::raw(" help  "),
+            Span::styled("q", Style::default().fg(Color::Cyan)),
+            Span::raw(" quit"),
+        ])
+    };
     frame.render_widget(Paragraph::new(status), chunks[2]);
+
+    // Help overlay
+    if matches!(app.mode, Mode::Help) {
+        draw_help(frame);
+    }
+}
+
+fn draw_help(frame: &mut ratatui::Frame) {
+    let area = frame.area();
+    let width = 40u16.min(area.width.saturating_sub(4));
+    let height = 14u16.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let help_lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ↑↓ / j k  ", Style::default().fg(Color::Cyan)),
+            Span::raw("Navigate notes"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ⏎ Enter   ", Style::default().fg(Color::Cyan)),
+            Span::raw("Edit selected note"),
+        ]),
+        Line::from(vec![
+            Span::styled("  d         ", Style::default().fg(Color::Cyan)),
+            Span::raw("Delete selected note"),
+        ]),
+        Line::from(vec![
+            Span::styled("  /         ", Style::default().fg(Color::Cyan)),
+            Span::raw("Search notes"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc       ", Style::default().fg(Color::Cyan)),
+            Span::raw("Cancel / back"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ?         ", Style::default().fg(Color::Cyan)),
+            Span::raw("Toggle this help"),
+        ]),
+        Line::from(vec![
+            Span::styled("  q         ", Style::default().fg(Color::Cyan)),
+            Span::raw("Quit"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "    Press ? or Esc to close",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let help = Paragraph::new(help_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Help ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+    frame.render_widget(help, popup);
 }

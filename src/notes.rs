@@ -184,6 +184,23 @@ pub fn update_note_body(name: &str, new_body: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn delete_note(name: &str) -> Result<()> {
+    let escaped_name = escape_applescript(name);
+
+    let script = format!(
+        r#"tell application "Notes"
+            set matchedNotes to (every note whose name contains "{escaped_name}")
+            if (count of matchedNotes) is 0 then
+                error "No note found matching: {escaped_name}"
+            end if
+            delete item 1 of matchedNotes
+        end tell"#
+    );
+
+    run_applescript(&script)?;
+    Ok(())
+}
+
 pub fn list_folders() -> Result<Vec<String>> {
     let script = r#"tell application "Notes"
             set folderNames to name of every folder
