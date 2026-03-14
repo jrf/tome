@@ -1,5 +1,6 @@
 mod editor;
 mod notes;
+mod theme;
 mod tui;
 
 use anyhow::Result;
@@ -8,6 +9,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(about = "Apple Notes from your terminal.")]
 struct Cli {
+    /// Color theme (synthwave, monochrome, ocean, sunset, forest, tokyo night moon)
+    #[arg(long, default_value = "synthwave")]
+    theme: String,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -53,8 +58,13 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let theme = theme::find_theme(&cli.theme).unwrap_or_else(|| {
+        eprintln!("Unknown theme '{}', using synthwave", cli.theme);
+        theme::default_theme()
+    });
+
     match cli.command {
-        None => tui::run(),
+        None => tui::run(theme),
         Some(cmd) => match cmd {
             Commands::List { folder } => {
                 let notes = notes::list_notes(folder.as_deref())?;

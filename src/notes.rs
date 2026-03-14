@@ -41,8 +41,10 @@ pub fn list_notes(folder: Option<&str>) -> Result<Vec<Note>> {
             repeat with f in {folder_loop}
                 set folderName to name of f
                 if folderName is not "Recently Deleted" then
-                    repeat with n in every note of f
-                        set end of output to folderName & "|||" & (id of n) & "|||" & (name of n)
+                    set noteIds to id of every note of f
+                    set noteNames to name of every note of f
+                    repeat with j from 1 to count of noteIds
+                        set end of output to folderName & "|||" & (item j of noteIds) & "|||" & (item j of noteNames)
                     end repeat
                 end if
             end repeat
@@ -62,9 +64,9 @@ pub fn list_notes(folder: Option<&str>) -> Result<Vec<Note>> {
             let parts: Vec<&str> = line.splitn(3, "|||").collect();
             if parts.len() >= 3 {
                 Some(Note {
+                    folder: parts[0].trim().to_string(),
                     id: parts[1].trim().to_string(),
                     name: parts[2].trim().to_string(),
-                    folder: parts[0].trim().to_string(),
                     body: String::new(),
                 })
             } else {
@@ -114,8 +116,11 @@ pub fn search_notes(query: &str) -> Result<Vec<Note>> {
             repeat with f in every folder
                 set folderName to name of f
                 if folderName is not "Recently Deleted" then
-                    repeat with n in (every note of f whose plaintext contains "{escaped}")
-                        set end of output to folderName & "|||" & (id of n) & "|||" & (name of n)
+                    set matched to (every note of f whose name contains "{escaped}")
+                    set noteIds to id of matched
+                    set noteNames to name of matched
+                    repeat with j from 1 to count of noteIds
+                        set end of output to folderName & "|||" & (item j of noteIds) & "|||" & (item j of noteNames)
                     end repeat
                 end if
             end repeat
@@ -135,9 +140,9 @@ pub fn search_notes(query: &str) -> Result<Vec<Note>> {
             let parts: Vec<&str> = line.splitn(3, "|||").collect();
             if parts.len() >= 3 {
                 Some(Note {
+                    folder: parts[0].trim().to_string(),
                     id: parts[1].trim().to_string(),
                     name: parts[2].trim().to_string(),
-                    folder: parts[0].trim().to_string(),
                     body: String::new(),
                 })
             } else {
@@ -184,6 +189,24 @@ pub fn update_note_body(name: &str, new_body: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn move_note(name: &str, to_folder: &str) -> Result<()> {
+    let escaped_name = escape_applescript(name);
+    let escaped_folder = escape_applescript(to_folder);
+
+    let script = format!(
+        r#"tell application "Notes"
+            set matchedNotes to (every note whose name contains "{escaped_name}")
+            if (count of matchedNotes) is 0 then
+                error "No note found matching: {escaped_name}"
+            end if
+            move item 1 of matchedNotes to folder "{escaped_folder}"
+        end tell"#
+    );
+
+    run_applescript(&script)?;
+    Ok(())
+}
+
 pub fn delete_note(name: &str) -> Result<()> {
     let escaped_name = escape_applescript(name);
 
@@ -203,9 +226,14 @@ pub fn delete_note(name: &str) -> Result<()> {
 
 pub fn list_folders() -> Result<Vec<String>> {
     let script = r#"tell application "Notes"
-            set folderNames to name of every folder
+            set output to {}
+            repeat with f in every folder
+                if name of f is not "Recently Deleted" then
+                    set end of output to name of f
+                end if
+            end repeat
             set AppleScript's text item delimiters to "\n"
-            return folderNames as text
+            return output as text
         end tell"#;
 
     let output = run_applescript(script)?;

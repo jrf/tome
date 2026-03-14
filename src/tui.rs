@@ -1,11 +1,12 @@
 use crate::editor;
 use crate::notes::{self, Note};
+use crate::theme::{self, Theme};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::DefaultTerminal;
@@ -15,6 +16,9 @@ enum Mode {
     Browse,
     Search,
     Help,
+    ThemePicker,
+    FolderPicker,
+    MovePicker,
 }
 
 struct App {
@@ -25,15 +29,26 @@ struct App {
     mode: Mode,
     should_quit: bool,
     confirm_delete: bool,
+    theme: Theme,
+    theme_selected: usize,
+    theme_before_preview: Theme,
+    folders: Vec<String>,
+    folder_selected: usize,
+    active_folder: Option<String>,
+    move_selected: usize,
 }
 
 impl App {
-    fn new(notes: Vec<Note>) -> Self {
+    fn new(notes: Vec<Note>, theme: Theme) -> Self {
         let filtered: Vec<usize> = (0..notes.len()).collect();
         let mut list_state = ListState::default();
         if !filtered.is_empty() {
             list_state.select(Some(0));
         }
+        let theme_selected = theme::ALL_THEMES
+            .iter()
+            .position(|(_, t)| t.accent == theme.accent && t.border == theme.border)
+            .unwrap_or(0);
         Self {
             notes,
             filtered,
@@ -42,6 +57,13 @@ impl App {
             mode: Mode::Browse,
             should_quit: false,
             confirm_delete: false,
+            theme,
+            theme_selected,
+            theme_before_preview: theme,
+            folders: vec![],
+            folder_selected: 0,
+            active_folder: None,
+            move_selected: 0,
         }
     }
 
@@ -52,6 +74,11 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, n)| {
+                if let Some(ref active) = self.active_folder {
+                    if n.folder != *active {
+                        return false;
+                    }
+                }
                 query.is_empty()
                     || n.name.to_lowercase().contains(&query)
                     || n.folder.to_lowercase().contains(&query)
@@ -95,16 +122,22 @@ impl App {
             self.apply_filter();
         }
     }
+
+    fn load_folders(&mut self) {
+        if let Ok(folders) = notes::list_folders() {
+            self.folders = folders;
+        }
+    }
 }
 
-pub fn run() -> Result<()> {
+pub fn run(theme: Theme) -> Result<()> {
     let notes = notes::list_notes(None)?;
     if notes.is_empty() {
         println!("No notes found.");
         return Ok(());
     }
 
-    let mut app = App::new(notes);
+    let mut app = App::new(notes, theme);
 
     terminal::enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
@@ -138,6 +171,30 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     }
                     KeyCode::Char('?') => {
                         app.mode = Mode::Help;
+                    }
+                    KeyCode::Char('t') => {
+                        app.theme_before_preview = app.theme;
+                        app.mode = Mode::ThemePicker;
+                    }
+                    KeyCode::Char('m') => {
+                        if app.selected_note().is_some() {
+                            app.load_folders();
+                            app.move_selected = 0;
+                            app.mode = Mode::MovePicker;
+                        }
+                    }
+                    KeyCode::Char('g') => {
+                        app.load_folders();
+                        app.folder_selected = match &app.active_folder {
+                            Some(name) => app
+                                .folders
+                                .iter()
+                                .position(|f| f == name)
+                                .map(|i| i + 1)
+                                .unwrap_or(0),
+                            None => 0,
+                        };
+                        app.mode = Mode::FolderPicker;
                     }
                     KeyCode::Char('r') => {
                         app.refresh();
@@ -211,6 +268,81 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     }
                     _ => {}
                 },
+                Mode::ThemePicker => match key.code {
+                    KeyCode::Esc | KeyCode::Char('t') => {
+                        app.theme = app.theme_before_preview;
+                        app.mode = Mode::Browse;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        if app.theme_selected + 1 < theme::ALL_THEMES.len() {
+                            app.theme_selected += 1;
+                            app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        if app.theme_selected > 0 {
+                            app.theme_selected -= 1;
+                            app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                        app.mode = Mode::Browse;
+                    }
+                    _ => {}
+                },
+                Mode::FolderPicker => match key.code {
+                    KeyCode::Esc | KeyCode::Char('g') => {
+                        app.mode = Mode::Browse;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let total = app.folders.len() + 1;
+                        if app.folder_selected + 1 < total {
+                            app.folder_selected += 1;
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        if app.folder_selected > 0 {
+                            app.folder_selected -= 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if app.folder_selected == 0 {
+                            app.active_folder = None;
+                        } else {
+                            app.active_folder =
+                                Some(app.folders[app.folder_selected - 1].clone());
+                        }
+                        app.apply_filter();
+                        app.mode = Mode::Browse;
+                    }
+                    _ => {}
+                },
+                Mode::MovePicker => match key.code {
+                    KeyCode::Esc | KeyCode::Char('m') => {
+                        app.mode = Mode::Browse;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        if app.move_selected + 1 < app.folders.len() {
+                            app.move_selected += 1;
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        if app.move_selected > 0 {
+                            app.move_selected -= 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(note) = app.selected_note() {
+                            let name = note.name.clone();
+                            let target = app.folders[app.move_selected].clone();
+                            let _ = notes::move_note(&name, &target);
+                            app.refresh();
+                        }
+                        app.mode = Mode::Browse;
+                    }
+                    _ => {}
+                },
             }
         }
 
@@ -223,6 +355,8 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 fn draw(frame: &mut ratatui::Frame, app: &mut App) {
+    let t = &app.theme;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -236,23 +370,27 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     let search_text = if app.search_query.is_empty() {
         match app.mode {
             Mode::Search => String::from("_"),
-            Mode::Browse | Mode::Help => String::from("Press / to search"),
+            _ => String::from("Press / to search"),
         }
     } else {
         match app.mode {
             Mode::Search => format!("{}_", app.search_query),
-            Mode::Browse | Mode::Help => app.search_query.clone(),
+            _ => app.search_query.clone(),
         }
     };
 
     let search_style = match app.mode {
-        Mode::Search => Style::default().fg(Color::Yellow),
-        Mode::Browse | Mode::Help => Style::default().fg(Color::DarkGray),
+        Mode::Search => Style::default().fg(t.accent),
+        _ => Style::default().fg(t.text_muted),
     };
 
-    let search = Paragraph::new(search_text)
-        .style(search_style)
-        .block(Block::default().borders(Borders::ALL).title(" Search "));
+    let search = Paragraph::new(search_text).style(search_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(t.border))
+            .title(" Search ")
+            .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+    );
     frame.render_widget(search, chunks[0]);
 
     // Note list
@@ -264,18 +402,29 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{}/", note.folder),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(t.text_muted),
                 ),
-                Span::styled(&note.name, Style::default().fg(Color::White)),
+                Span::styled(&note.name, Style::default().fg(t.text)),
             ]))
         })
         .collect();
 
+    let title = match &app.active_folder {
+        Some(name) => format!(" Notes - {} ", name),
+        None => " Notes ".to_string(),
+    };
+
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Notes "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(t.border))
+                .title(title)
+                .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+        )
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .fg(t.text_bright)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ");
@@ -285,42 +434,52 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // Status bar
     let status = if app.confirm_delete {
         Line::from(vec![
-            Span::styled(" Delete note? ", Style::default().fg(Color::Red)),
-            Span::styled("y", Style::default().fg(Color::Cyan)),
-            Span::raw(" yes  "),
-            Span::styled("n", Style::default().fg(Color::Cyan)),
-            Span::raw(" no"),
+            Span::styled(" Delete note? ", Style::default().fg(t.error)),
+            Span::styled("y", Style::default().fg(t.accent)),
+            Span::styled(" yes  ", Style::default().fg(t.text)),
+            Span::styled("n", Style::default().fg(t.accent)),
+            Span::styled(" no", Style::default().fg(t.text)),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" ↑↓/jk", Style::default().fg(Color::Cyan)),
-            Span::raw(" navigate  "),
-            Span::styled("⏎", Style::default().fg(Color::Cyan)),
-            Span::raw(" edit  "),
-            Span::styled("r", Style::default().fg(Color::Cyan)),
-            Span::raw(" refresh  "),
-            Span::styled("d", Style::default().fg(Color::Cyan)),
-            Span::raw(" delete  "),
-            Span::styled("/", Style::default().fg(Color::Cyan)),
-            Span::raw(" search  "),
-            Span::styled("?", Style::default().fg(Color::Cyan)),
-            Span::raw(" help  "),
-            Span::styled("q", Style::default().fg(Color::Cyan)),
-            Span::raw(" quit"),
+            Span::styled(" ↑↓/jk", Style::default().fg(t.accent)),
+            Span::styled(" navigate  ", Style::default().fg(t.text_dim)),
+            Span::styled("⏎", Style::default().fg(t.accent)),
+            Span::styled(" edit  ", Style::default().fg(t.text_dim)),
+            Span::styled("r", Style::default().fg(t.accent)),
+            Span::styled(" refresh  ", Style::default().fg(t.text_dim)),
+            Span::styled("d", Style::default().fg(t.accent)),
+            Span::styled(" delete  ", Style::default().fg(t.text_dim)),
+            Span::styled("m", Style::default().fg(t.accent)),
+            Span::styled(" move  ", Style::default().fg(t.text_dim)),
+            Span::styled("g", Style::default().fg(t.accent)),
+            Span::styled(" folder  ", Style::default().fg(t.text_dim)),
+            Span::styled("t", Style::default().fg(t.accent)),
+            Span::styled(" theme  ", Style::default().fg(t.text_dim)),
+            Span::styled("/", Style::default().fg(t.accent)),
+            Span::styled(" search  ", Style::default().fg(t.text_dim)),
+            Span::styled("?", Style::default().fg(t.accent)),
+            Span::styled(" help  ", Style::default().fg(t.text_dim)),
+            Span::styled("q", Style::default().fg(t.accent)),
+            Span::styled(" quit", Style::default().fg(t.text_dim)),
         ])
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 
-    // Help overlay
-    if matches!(app.mode, Mode::Help) {
-        draw_help(frame);
+    // Overlays
+    match app.mode {
+        Mode::Help => draw_help(frame, t),
+        Mode::ThemePicker => draw_theme_picker(frame, app),
+        Mode::FolderPicker => draw_folder_picker(frame, app),
+        Mode::MovePicker => draw_move_picker(frame, app),
+        _ => {}
     }
 }
 
-fn draw_help(frame: &mut ratatui::Frame) {
+fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
     let area = frame.area();
     let width = 40u16.min(area.width.saturating_sub(4));
-    let height = 14u16.min(area.height.saturating_sub(4));
+    let height = 18u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -330,41 +489,53 @@ fn draw_help(frame: &mut ratatui::Frame) {
     let help_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  ↑↓ / j k  ", Style::default().fg(Color::Cyan)),
-            Span::raw("Navigate notes"),
+            Span::styled("  ↑↓ / j k  ", Style::default().fg(t.accent)),
+            Span::styled("Navigate notes", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  ⏎ Enter   ", Style::default().fg(Color::Cyan)),
-            Span::raw("Edit selected note"),
+            Span::styled("  ⏎ Enter   ", Style::default().fg(t.accent)),
+            Span::styled("Edit selected note", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  r         ", Style::default().fg(Color::Cyan)),
-            Span::raw("Refresh from Notes.app"),
+            Span::styled("  r         ", Style::default().fg(t.accent)),
+            Span::styled("Refresh from Notes.app", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  d         ", Style::default().fg(Color::Cyan)),
-            Span::raw("Delete selected note"),
+            Span::styled("  d         ", Style::default().fg(t.accent)),
+            Span::styled("Delete selected note", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  /         ", Style::default().fg(Color::Cyan)),
-            Span::raw("Search notes"),
+            Span::styled("  m         ", Style::default().fg(t.accent)),
+            Span::styled("Move to folder", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  Esc       ", Style::default().fg(Color::Cyan)),
-            Span::raw("Cancel / back"),
+            Span::styled("  g         ", Style::default().fg(t.accent)),
+            Span::styled("Filter by folder", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  ?         ", Style::default().fg(Color::Cyan)),
-            Span::raw("Toggle this help"),
+            Span::styled("  t         ", Style::default().fg(t.accent)),
+            Span::styled("Change theme", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  q         ", Style::default().fg(Color::Cyan)),
-            Span::raw("Quit"),
+            Span::styled("  /         ", Style::default().fg(t.accent)),
+            Span::styled("Search notes", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc       ", Style::default().fg(t.accent)),
+            Span::styled("Cancel / back", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ?         ", Style::default().fg(t.accent)),
+            Span::styled("Toggle this help", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  q         ", Style::default().fg(t.accent)),
+            Span::styled("Quit", Style::default().fg(t.text)),
         ]),
         Line::from(""),
         Line::from(Span::styled(
             "    Press ? or Esc to close",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(t.text_muted),
         )),
     ];
 
@@ -372,7 +543,143 @@ fn draw_help(frame: &mut ratatui::Frame) {
         Block::default()
             .borders(Borders::ALL)
             .title(" Help ")
-            .border_style(Style::default().fg(Color::Yellow)),
+            .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD))
+            .border_style(Style::default().fg(t.accent)),
     );
     frame.render_widget(help, popup);
+}
+
+fn draw_theme_picker(frame: &mut ratatui::Frame, app: &App) {
+    let t = &app.theme;
+    let area = frame.area();
+    let height = (theme::ALL_THEMES.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let width = 30u16.min(area.width.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = theme::ALL_THEMES
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| {
+            let style = if i == app.theme_selected {
+                Style::default()
+                    .fg(t.text_bright)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.text)
+            };
+            ListItem::new(Span::styled(format!("  {name}"), style))
+        })
+        .collect();
+
+    let mut state = ListState::default();
+    state.select(Some(app.theme_selected));
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Theme ")
+                .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD))
+                .border_style(Style::default().fg(t.accent)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(t.text_bright)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, popup, &mut state);
+}
+
+fn draw_folder_picker(frame: &mut ratatui::Frame, app: &App) {
+    let t = &app.theme;
+    let area = frame.area();
+    let total = app.folders.len() + 1;
+    let height = (total as u16 + 4).min(area.height.saturating_sub(4));
+    let width = 30u16.min(area.width.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let mut entries: Vec<ListItem> = vec![ListItem::new(Span::styled(
+        "  All",
+        Style::default().fg(t.text),
+    ))];
+
+    entries.extend(app.folders.iter().map(|name| {
+        ListItem::new(Span::styled(
+            format!("  {name}"),
+            Style::default().fg(t.text),
+        ))
+    }));
+
+    let mut state = ListState::default();
+    state.select(Some(app.folder_selected));
+
+    let list = List::new(entries)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Folder ")
+                .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD))
+                .border_style(Style::default().fg(t.accent)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(t.text_bright)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, popup, &mut state);
+}
+
+fn draw_move_picker(frame: &mut ratatui::Frame, app: &App) {
+    let t = &app.theme;
+    let area = frame.area();
+    let height = (app.folders.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let width = 30u16.min(area.width.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = app
+        .folders
+        .iter()
+        .map(|name| {
+            ListItem::new(Span::styled(
+                format!("  {name}"),
+                Style::default().fg(t.text),
+            ))
+        })
+        .collect();
+
+    let mut state = ListState::default();
+    state.select(Some(app.move_selected));
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Move to ")
+                .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD))
+                .border_style(Style::default().fg(t.accent)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(t.text_bright)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, popup, &mut state);
 }
