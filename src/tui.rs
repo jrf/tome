@@ -88,6 +88,13 @@ impl App {
             }
         }
     }
+
+    fn refresh(&mut self) {
+        if let Ok(refreshed) = notes::list_notes(None) {
+            self.notes = refreshed;
+            self.apply_filter();
+        }
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -132,6 +139,9 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('?') => {
                         app.mode = Mode::Help;
                     }
+                    KeyCode::Char('r') => {
+                        app.refresh();
+                    }
                     KeyCode::Char('d') => {
                         if app.selected_note().is_some() {
                             app.confirm_delete = true;
@@ -141,10 +151,7 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                         if let Some(note) = app.selected_note() {
                             let name = note.name.clone();
                             let _ = notes::delete_note(&name);
-                            if let Ok(refreshed) = notes::list_notes(None) {
-                                app.notes = refreshed;
-                                app.apply_filter();
-                            }
+                            app.refresh();
                         }
                         app.confirm_delete = false;
                     }
@@ -290,6 +297,8 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             Span::raw(" navigate  "),
             Span::styled("⏎", Style::default().fg(Color::Cyan)),
             Span::raw(" edit  "),
+            Span::styled("r", Style::default().fg(Color::Cyan)),
+            Span::raw(" refresh  "),
             Span::styled("d", Style::default().fg(Color::Cyan)),
             Span::raw(" delete  "),
             Span::styled("/", Style::default().fg(Color::Cyan)),
@@ -327,6 +336,10 @@ fn draw_help(frame: &mut ratatui::Frame) {
         Line::from(vec![
             Span::styled("  ⏎ Enter   ", Style::default().fg(Color::Cyan)),
             Span::raw("Edit selected note"),
+        ]),
+        Line::from(vec![
+            Span::styled("  r         ", Style::default().fg(Color::Cyan)),
+            Span::raw("Refresh from Notes.app"),
         ]),
         Line::from(vec![
             Span::styled("  d         ", Style::default().fg(Color::Cyan)),

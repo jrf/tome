@@ -38,7 +38,23 @@ tome edit "Shopping List"
 
 # List all folders
 tome folders
+
+# Launch interactive TUI (default when run with no arguments)
+tome
 ```
+
+### Interactive TUI
+
+Running `tome` with no arguments opens an interactive terminal UI for browsing and managing notes.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `↑` / `↓` | Navigate notes |
+| `Enter` | Edit selected note in `$EDITOR` |
+| `d` | Delete selected note (with confirmation) |
+| `/` | Search notes |
+| `?` | Toggle help screen |
+| `q` / `Esc` | Quit |
 
 ## How it works
 
