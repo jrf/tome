@@ -1,3 +1,4 @@
+mod config;
 mod editor;
 mod notes;
 mod theme;
@@ -53,13 +54,51 @@ enum Commands {
     },
     /// List all folders
     Folders,
+    /// Manage folders
+    Folder {
+        #[command(subcommand)]
+        action: FolderAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum FolderAction {
+    /// Create a new folder
+    New {
+        /// Folder name
+        name: String,
+    },
+    /// Rename a folder
+    Rename {
+        /// Current folder name
+        old: String,
+        /// New folder name
+        new: String,
+    },
+    /// Delete a folder
+    Delete {
+        /// Folder name
+        name: String,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let theme = theme::find_theme(&cli.theme).unwrap_or_else(|| {
-        eprintln!("Unknown theme '{}', using synthwave", cli.theme);
+    let cfg = config::load();
+
+    // CLI --theme flag overrides config, but only if explicitly provided
+    let theme_name = if cli.theme != "synthwave" {
+        // User explicitly passed --theme
+        cli.theme.clone()
+    } else if let Some(ref saved) = cfg.theme {
+        saved.clone()
+    } else {
+        cli.theme.clone()
+    };
+
+    let theme = theme::find_theme(&theme_name).unwrap_or_else(|| {
+        eprintln!("Unknown theme '{}', using synthwave", theme_name);
         theme::default_theme()
     });
 
@@ -137,6 +176,23 @@ fn main() -> Result<()> {
                 }
                 Ok(())
             }
+            Commands::Folder { action } => match action {
+                FolderAction::New { name } => {
+                    notes::create_folder(&name)?;
+                    println!("Created folder: {name}");
+                    Ok(())
+                }
+                FolderAction::Rename { old, new } => {
+                    notes::rename_folder(&old, &new)?;
+                    println!("Renamed folder: {old} -> {new}");
+                    Ok(())
+                }
+                FolderAction::Delete { name } => {
+                    notes::delete_folder(&name)?;
+                    println!("Deleted folder: {name}");
+                    Ok(())
+                }
+            },
         },
     }
 }

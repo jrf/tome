@@ -1,3 +1,4 @@
+use crate::config;
 use crate::editor;
 use crate::notes::{self, Note};
 use crate::theme::{self, Theme};
@@ -18,8 +19,15 @@ enum Mode {
     Help,
     ThemePicker,
     FolderPicker,
+    FolderInput(FolderInputKind),
     MovePicker,
 }
+
+enum FolderInputKind {
+    New,
+    Rename(String),
+}
+
 
 struct App {
     notes: Vec<Note>,
@@ -36,6 +44,8 @@ struct App {
     folder_selected: usize,
     active_folder: Option<String>,
     move_selected: usize,
+    input_buf: String,
+    confirm_folder_delete: bool,
 }
 
 impl App {
@@ -64,6 +74,8 @@ impl App {
             folder_selected: 0,
             active_folder: None,
             move_selected: 0,
+            input_buf: String::new(),
+            confirm_folder_delete: false,
         }
     }
 
@@ -291,27 +303,32 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                         }
                     }
                     KeyCode::Enter => {
-                        app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                        let (name, selected_theme) = theme::ALL_THEMES[app.theme_selected];
+                        app.theme = selected_theme;
                         app.mode = Mode::Browse;
+                        let mut cfg = config::load();
+                        cfg.theme = Some(name.to_string());
+                        let _ = config::save(&cfg);
                     }
                     _ => {}
                 },
                 Mode::FolderPicker => match key.code {
                     KeyCode::Esc | KeyCode::Char('g') => {
+                        app.confirm_folder_delete = false;
                         app.mode = Mode::Browse;
                     }
-                    KeyCode::Char('j') | KeyCode::Down => {
+                    KeyCode::Char('j') | KeyCode::Down if !app.confirm_folder_delete => {
                         let total = app.folders.len() + 1;
                         if app.folder_selected + 1 < total {
                             app.folder_selected += 1;
                         }
                     }
-                    KeyCode::Char('k') | KeyCode::Up => {
+                    KeyCode::Char('k') | KeyCode::Up if !app.confirm_folder_delete => {
                         if app.folder_selected > 0 {
                             app.folder_selected -= 1;
                         }
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter if !app.confirm_folder_delete => {
                         if app.folder_selected == 0 {
                             app.active_folder = None;
                         } else {
@@ -320,6 +337,69 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                         }
                         app.apply_filter();
                         app.mode = Mode::Browse;
+                    }
+                    KeyCode::Char('n') if !app.confirm_folder_delete => {
+                        app.input_buf.clear();
+                        app.mode = Mode::FolderInput(FolderInputKind::New);
+                    }
+                    KeyCode::Char('r') if !app.confirm_folder_delete => {
+                        if app.folder_selected > 0 {
+                            let old_name = app.folders[app.folder_selected - 1].clone();
+                            app.input_buf = old_name.clone();
+                            app.mode = Mode::FolderInput(FolderInputKind::Rename(old_name));
+                        }
+                    }
+                    KeyCode::Char('d') if !app.confirm_folder_delete => {
+                        if app.folder_selected > 0 {
+                            app.confirm_folder_delete = true;
+                        }
+                    }
+                    KeyCode::Char('y') if app.confirm_folder_delete => {
+                        if app.folder_selected > 0 {
+                            let name = app.folders[app.folder_selected - 1].clone();
+                            let _ = notes::delete_folder(&name);
+                            if app.active_folder.as_deref() == Some(&name) {
+                                app.active_folder = None;
+                            }
+                            app.load_folders();
+                            app.refresh();
+                            app.folder_selected = 0;
+                        }
+                        app.confirm_folder_delete = false;
+                    }
+                    _ => {
+                        app.confirm_folder_delete = false;
+                    }
+                },
+                Mode::FolderInput(ref kind) => match key.code {
+                    KeyCode::Esc => {
+                        app.mode = Mode::FolderPicker;
+                    }
+                    KeyCode::Enter => {
+                        let name = app.input_buf.trim().to_string();
+                        if !name.is_empty() {
+                            match kind {
+                                FolderInputKind::New => {
+                                    let _ = notes::create_folder(&name);
+                                }
+                                FolderInputKind::Rename(old) => {
+                                    let _ = notes::rename_folder(old, &name);
+                                    if app.active_folder.as_deref() == Some(old.as_str()) {
+                                        app.active_folder = Some(name.clone());
+                                    }
+                                }
+                            }
+                            app.load_folders();
+                            app.refresh();
+                        }
+                        app.folder_selected = 0;
+                        app.mode = Mode::FolderPicker;
+                    }
+                    KeyCode::Backspace => {
+                        app.input_buf.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.input_buf.push(c);
                     }
                     _ => {}
                 },
@@ -459,7 +539,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     match app.mode {
         Mode::Help => draw_help(frame, t),
         Mode::ThemePicker => draw_theme_picker(frame, app),
-        Mode::FolderPicker => draw_folder_picker(frame, app),
+        Mode::FolderPicker | Mode::FolderInput(_) => draw_folder_picker(frame, app),
         Mode::MovePicker => draw_move_picker(frame, app),
         _ => {}
     }
@@ -499,7 +579,7 @@ fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
         ]),
         Line::from(vec![
             Span::styled("  g         ", Style::default().fg(t.accent)),
-            Span::styled("Filter by folder", Style::default().fg(t.text)),
+            Span::styled("Folders (n/r/d to manage)", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
             Span::styled("  t         ", Style::default().fg(t.accent)),
@@ -589,8 +669,13 @@ fn draw_folder_picker(frame: &mut ratatui::Frame, app: &App) {
     let t = &app.theme;
     let area = frame.area();
     let total = app.folders.len() + 1;
-    let height = (total as u16 + 4).min(area.height.saturating_sub(4));
-    let width = 30u16.min(area.width.saturating_sub(4));
+    // Extra lines for hints or input
+    let extra = match app.mode {
+        Mode::FolderInput(_) => 3,
+        _ => 2,
+    };
+    let height = (total as u16 + extra + 3).min(area.height.saturating_sub(4));
+    let width = 40u16.min(area.width.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -602,12 +687,50 @@ fn draw_folder_picker(frame: &mut ratatui::Frame, app: &App) {
         Style::default().fg(t.text),
     ))];
 
-    entries.extend(app.folders.iter().map(|name| {
-        ListItem::new(Span::styled(
-            format!("  {name}"),
-            Style::default().fg(t.text),
-        ))
+    entries.extend(app.folders.iter().enumerate().map(|(i, name)| {
+        let style = if app.confirm_folder_delete && app.folder_selected == i + 1 {
+            Style::default().fg(t.error)
+        } else {
+            Style::default().fg(t.text)
+        };
+        ListItem::new(Span::styled(format!("  {name}"), style))
     }));
+
+    // Add hint/input line
+    match &app.mode {
+        Mode::FolderInput(kind) => {
+            let label = match kind {
+                FolderInputKind::New => "New: ",
+                FolderInputKind::Rename(_) => "Rename: ",
+            };
+            entries.push(ListItem::new(Line::from("")));
+            entries.push(ListItem::new(Line::from(vec![
+                Span::styled(format!("  {label}"), Style::default().fg(t.accent)),
+                Span::styled(format!("{}_", app.input_buf), Style::default().fg(t.text_bright)),
+            ])));
+        }
+        _ => {
+            let hints = if app.confirm_folder_delete {
+                vec![
+                    Span::styled(" Delete? ", Style::default().fg(t.error)),
+                    Span::styled("y", Style::default().fg(t.accent)),
+                    Span::styled("/", Style::default().fg(t.text_dim)),
+                    Span::styled("n", Style::default().fg(t.accent)),
+                ]
+            } else {
+                vec![
+                    Span::styled(" n", Style::default().fg(t.accent)),
+                    Span::styled("ew ", Style::default().fg(t.text_dim)),
+                    Span::styled("r", Style::default().fg(t.accent)),
+                    Span::styled("ename ", Style::default().fg(t.text_dim)),
+                    Span::styled("d", Style::default().fg(t.accent)),
+                    Span::styled("elete", Style::default().fg(t.text_dim)),
+                ]
+            };
+            entries.push(ListItem::new(Line::from("")));
+            entries.push(ListItem::new(Line::from(hints)));
+        }
+    }
 
     let mut state = ListState::default();
     state.select(Some(app.folder_selected));

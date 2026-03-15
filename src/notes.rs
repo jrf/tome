@@ -255,3 +255,37 @@ pub fn list_folders() -> Result<Vec<String>> {
 
     Ok(output.lines().map(|l| l.trim().to_string()).collect())
 }
+
+pub fn create_folder(name: &str) -> Result<()> {
+    let escaped = escape_applescript(name);
+    let script = format!(
+        r#"tell application "Notes"
+            make new folder with properties {{name:"{escaped}"}}
+        end tell"#
+    );
+    run_applescript(&script)?;
+    Ok(())
+}
+
+pub fn rename_folder(old_name: &str, new_name: &str) -> Result<()> {
+    let escaped_old = escape_applescript(old_name);
+    let escaped_new = escape_applescript(new_name);
+    let script = format!(
+        r#"tell application "Notes"
+            set name of folder "{escaped_old}" to "{escaped_new}"
+        end tell"#
+    );
+    run_applescript(&script)?;
+    Ok(())
+}
+
+pub fn delete_folder(name: &str) -> Result<()> {
+    let escaped = escape_applescript(name);
+    let script = format!(
+        r#"tell application "Notes"
+            delete folder "{escaped}"
+        end tell"#
+    );
+    run_applescript(&script)?;
+    Ok(())
+}
