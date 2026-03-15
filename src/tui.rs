@@ -223,11 +223,15 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                             terminal::disable_raw_mode()?;
 
                             if let Ok(full_note) = notes::get_note(&name) {
+                                let content = format!("{}\n\n{}", full_note.name, full_note.body);
                                 if let Ok(edited) =
-                                    editor::edit(&full_note.body, &format!("{}.md", name))
+                                    editor::edit(&content, &format!("{}.md", name))
                                 {
-                                    if edited != full_note.body {
-                                        notes::update_note_body(&full_note.name, &edited)?;
+                                    if edited != content {
+                                        let (new_title, new_body) = edited.split_once('\n')
+                                            .map(|(t, b)| (t.trim().to_string(), b.trim_start().to_string()))
+                                            .unwrap_or((edited, String::new()));
+                                        notes::update_note(&full_note.name, &new_title, &new_body)?;
                                     }
                                 }
                             }
@@ -235,6 +239,7 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                             terminal::enable_raw_mode()?;
                             execute!(stdout(), EnterAlternateScreen)?;
                             *terminal = ratatui::init();
+                            app.refresh();
                         }
                     }
                     _ => {

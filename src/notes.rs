@@ -100,11 +100,22 @@ pub fn get_note(name: &str) -> Result<Note> {
         bail!("Could not parse note response");
     }
 
+    let name = parts[2].trim().to_string();
+    let raw_body = parts[3].trim();
+
+    // Apple Notes' plaintext includes the title as the first line.
+    // Strip it so editing doesn't duplicate the title on save.
+    let body = raw_body
+        .strip_prefix(&name)
+        .map(|s| s.trim_start_matches('\n'))
+        .unwrap_or(raw_body)
+        .to_string();
+
     Ok(Note {
         id: parts[1].trim().to_string(),
-        name: parts[2].trim().to_string(),
+        name,
         folder: parts[0].trim().to_string(),
-        body: parts[3].trim().to_string(),
+        body,
     })
 }
 
@@ -170,8 +181,9 @@ pub fn create_note(title: &str, body: &str, folder: Option<&str>) -> Result<()> 
     Ok(())
 }
 
-pub fn update_note_body(name: &str, new_body: &str) -> Result<()> {
+pub fn update_note(name: &str, new_title: &str, new_body: &str) -> Result<()> {
     let escaped_name = escape_applescript(name);
+    let escaped_title = escape_applescript(new_title);
     let html_body = escape_applescript(&new_body.replace('\n', "<br>"));
 
     let script = format!(
@@ -181,7 +193,7 @@ pub fn update_note_body(name: &str, new_body: &str) -> Result<()> {
                 error "No note found matching: {escaped_name}"
             end if
             set n to item 1 of matchedNotes
-            set body of n to "<h1>{escaped_name}</h1><br>{html_body}"
+            set body of n to "<h1>{escaped_title}</h1><br>{html_body}"
         end tell"#
     );
 

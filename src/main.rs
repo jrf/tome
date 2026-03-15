@@ -117,12 +117,16 @@ fn main() -> Result<()> {
             }
             Commands::Edit { name } => {
                 let note = notes::get_note(&name)?;
-                let edited = editor::edit(&note.body, &format!("{}.md", note.name))?;
-                if edited == note.body {
+                let content = format!("{}\n\n{}", note.name, note.body);
+                let edited = editor::edit(&content, &format!("{}.md", note.name))?;
+                if edited == content {
                     println!("No changes made.");
                 } else {
-                    notes::update_note_body(&note.name, &edited)?;
-                    println!("Updated note: {}", note.name);
+                    let (new_title, new_body) = edited.split_once('\n')
+                        .map(|(t, b)| (t.trim(), b.trim_start()))
+                        .unwrap_or((&edited, ""));
+                    notes::update_note(&note.name, new_title, new_body)?;
+                    println!("Updated note: {}", new_title);
                 }
                 Ok(())
             }

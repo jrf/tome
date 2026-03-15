@@ -6,7 +6,8 @@ use std::process::Command;
 pub fn edit(content: &str, filename: &str) -> Result<String> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     let temp_dir = env::temp_dir();
-    let temp_file = temp_dir.join(format!("tome_{filename}"));
+    let safe_filename = filename.replace('/', "_");
+    let temp_file = temp_dir.join(format!("tome_{safe_filename}"));
 
     fs::write(&temp_file, content).context("Failed to write temp file")?;
 
@@ -24,5 +25,5 @@ pub fn edit(content: &str, filename: &str) -> Result<String> {
 
     let edited = fs::read_to_string(&temp_file).context("Failed to read edited file")?;
     fs::remove_file(&temp_file).ok();
-    Ok(edited)
+    Ok(edited.trim().to_string())
 }
