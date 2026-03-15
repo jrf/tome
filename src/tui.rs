@@ -227,6 +227,27 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('n') if app.confirm_delete => {
                         app.confirm_delete = false;
                     }
+                    KeyCode::Char('n') => {
+                        ratatui::restore();
+                        execute!(stdout(), LeaveAlternateScreen)?;
+                        terminal::disable_raw_mode()?;
+
+                        if let Ok(edited) = editor::edit("", "tome_new.md") {
+                            let edited = edited.trim().to_string();
+                            if !edited.is_empty() {
+                                let (title, body) = edited
+                                    .split_once('\n')
+                                    .map(|(t, b)| (t.trim().to_string(), b.trim_start().to_string()))
+                                    .unwrap_or((edited, String::new()));
+                                notes::create_note(&title, &body, app.active_folder.as_deref())?;
+                            }
+                        }
+
+                        terminal::enable_raw_mode()?;
+                        execute!(stdout(), EnterAlternateScreen)?;
+                        *terminal = ratatui::init();
+                        app.refresh();
+                    }
                     KeyCode::Enter => {
                         if let Some(note) = app.selected_note() {
                             let name = note.name.clone();
@@ -548,7 +569,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
     let area = frame.area();
     let width = 40u16.min(area.width.saturating_sub(4));
-    let height = 18u16.min(area.height.saturating_sub(4));
+    let height = 19u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -564,6 +585,10 @@ fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
         Line::from(vec![
             Span::styled("  ⏎ Enter   ", Style::default().fg(t.accent)),
             Span::styled("Edit selected note", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  n         ", Style::default().fg(t.accent)),
+            Span::styled("New note", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
             Span::styled("  r         ", Style::default().fg(t.accent)),
