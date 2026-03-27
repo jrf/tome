@@ -76,6 +76,62 @@ pub fn list_notes(folder: Option<&str>) -> Result<Vec<Note>> {
         .collect())
 }
 
+/// Fetch all note bodies in a single AppleScript call.
+/// Returns (name, body) pairs. Intended for background loading.
+pub fn fetch_all_bodies() -> Result<Vec<(String, String)>> {
+    let script = r#"tell application "Notes"
+            set output to {}
+            repeat with f in every folder
+                set folderName to name of f
+                if folderName is not "Recently Deleted" then
+                    set allNotes to every note of f
+                    repeat with j from 1 to count of allNotes
+                        set n to item j of allNotes
+                        set noteName to name of n
+                        set noteBody to plaintext of n
+                        if noteBody is missing value then
+                            set encodedBody to ""
+                        else
+                            set prevDelimiters to AppleScript's text item delimiters
+                            set AppleScript's text item delimiters to {return, linefeed, character id 8232}
+                            set bodyParts to text items of noteBody
+                            set AppleScript's text item delimiters to "\\n"
+                            set encodedBody to bodyParts as text
+                            set AppleScript's text item delimiters to prevDelimiters
+                        end if
+                        set end of output to noteName & "|||" & encodedBody
+                    end repeat
+                end if
+            end repeat
+            set AppleScript's text item delimiters to "<<<NOTE>>>"
+            return output as text
+        end tell"#;
+
+    let output = run_applescript(script)?;
+    if output.is_empty() {
+        return Ok(vec![]);
+    }
+
+    Ok(output
+        .split("<<<NOTE>>>")
+        .filter_map(|record| {
+            let record = record.trim();
+            if record.is_empty() {
+                return None;
+            }
+            let (name, encoded_body) = record.split_once("|||")?;
+            let name = name.trim().to_string();
+            let raw_body = encoded_body.replace("\\n", "\n");
+            let body = raw_body
+                .strip_prefix(&name)
+                .map(|s| s.trim_start_matches('\n'))
+                .unwrap_or(&raw_body)
+                .to_string();
+            Some((name, body))
+        })
+        .collect())
+}
+
 pub fn get_note(name: &str) -> Result<Note> {
     let escaped = escape_applescript(name);
     let script = format!(

@@ -10,9 +10,12 @@ use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::DefaultTerminal;
+use std::collections::HashMap;
 use std::io::stdout;
+use std::sync::mpsc;
+use std::thread;
 
 enum Mode {
     Browse,
@@ -47,10 +50,12 @@ struct App {
     move_selected: usize,
     input_buf: String,
     confirm_folder_delete: bool,
+    body_cache: HashMap<String, String>,
+    body_rx: mpsc::Receiver<Vec<(String, String)>>,
 }
 
 impl App {
-    fn new(notes: Vec<Note>, theme: Theme) -> Self {
+    fn new(notes: Vec<Note>, theme: Theme, body_rx: mpsc::Receiver<Vec<(String, String)>>) -> Self {
         let filtered: Vec<usize> = (0..notes.len()).collect();
         let mut list_state = ListState::default();
         if !filtered.is_empty() {
@@ -77,6 +82,8 @@ impl App {
             move_selected: 0,
             input_buf: String::new(),
             confirm_folder_delete: false,
+            body_cache: HashMap::new(),
+            body_rx,
         }
     }
 
@@ -109,7 +116,8 @@ impl App {
                         .is_none_or(|f| n.folder == *f)
                 })
                 .filter_map(|(i, n)| {
-                    let haystack = format!("{}/{}", n.folder, n.name);
+                    let body = self.body_cache.get(&n.name).map(|s| s.as_str()).unwrap_or("");
+                    let haystack = format!("{}/{} {}", n.folder, n.name, body);
                     let score = pattern.score(
                         nucleo_matcher::Utf32Str::new(&haystack, &mut buf),
                         &mut matcher,
@@ -179,11 +187,28 @@ impl App {
         }
     }
 
+    fn drain_bodies(&mut self) {
+        if let Ok(bodies) = self.body_rx.try_recv() {
+            for (name, body) in bodies {
+                self.body_cache.insert(name, body);
+            }
+        }
+    }
+
     fn refresh(&mut self) {
         if let Ok(refreshed) = notes::list_notes(None) {
             self.notes = refreshed;
+            self.body_cache.clear();
             self.apply_filter();
         }
+        // Re-spawn background body loader
+        let (tx, rx) = mpsc::channel();
+        self.body_rx = rx;
+        thread::spawn(move || {
+            if let Ok(bodies) = notes::fetch_all_bodies() {
+                let _ = tx.send(bodies);
+            }
+        });
     }
 
     fn load_folders(&mut self) {
@@ -200,7 +225,15 @@ pub fn run(theme: Theme) -> Result<()> {
         return Ok(());
     }
 
-    let mut app = App::new(notes, theme);
+    // Fetch bodies in background
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        if let Ok(bodies) = notes::fetch_all_bodies() {
+            let _ = tx.send(bodies);
+        }
+    });
+
+    let mut app = App::new(notes, theme, rx);
 
     terminal::enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
@@ -217,8 +250,15 @@ pub fn run(theme: Theme) -> Result<()> {
 
 fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
+        // Check for bodies from background loader
+        app.drain_bodies();
+
         terminal.draw(|frame| draw(frame, app))?;
 
+        // Poll with timeout so we re-draw when background bodies arrive
+        if !event::poll(std::time::Duration::from_millis(100))? {
+            continue;
+        }
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
@@ -601,6 +641,12 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     );
     frame.render_widget(search, chunks[0]);
 
+    // Split main area into list + preview
+    let main_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(chunks[1]);
+
     // Note list
     let items: Vec<ListItem> = app
         .filtered
@@ -637,7 +683,29 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         )
         .highlight_symbol("▸ ");
 
-    frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    frame.render_stateful_widget(list, main_chunks[0], &mut app.list_state);
+
+    // Preview pane
+    let (preview_title, preview_body) = match app.selected_note() {
+        Some(note) => (
+            format!(" {} ", note.name),
+            app.body_cache.get(&note.name).cloned().unwrap_or_default(),
+        ),
+        None => (" Preview ".to_string(), String::new()),
+    };
+
+    let preview = Paragraph::new(preview_body)
+        .style(Style::default().fg(t.text))
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(t.border))
+                .title(preview_title)
+                .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+        );
+
+    frame.render_widget(preview, main_chunks[1]);
 
     // Status bar
     let status = if app.confirm_delete {
