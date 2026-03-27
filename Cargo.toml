@@ -10,3 +10,4 @@ crossterm = "0.28"
 anyhow = "1"
 toml = "1.0.6"
 serde = { version = "1.0.228", features = ["derive"] }
+nucleo-matcher = "0.3.1"

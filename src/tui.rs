@@ -4,6 +4,7 @@ use crate::notes::{self, Note};
 use crate::theme::{self, Theme};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -80,23 +81,46 @@ impl App {
     }
 
     fn apply_filter(&mut self) {
-        let query = self.search_query.to_lowercase();
-        self.filtered = self
-            .notes
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| {
-                if let Some(ref active) = self.active_folder {
-                    if n.folder != *active {
-                        return false;
-                    }
-                }
-                query.is_empty()
-                    || n.name.to_lowercase().contains(&query)
-                    || n.folder.to_lowercase().contains(&query)
-            })
-            .map(|(i, _)| i)
-            .collect();
+        if self.search_query.is_empty() {
+            self.filtered = self
+                .notes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| {
+                    self.active_folder
+                        .as_ref()
+                        .is_none_or(|f| n.folder == *f)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        } else {
+            let pattern =
+                Pattern::new(&self.search_query, CaseMatching::Ignore, Normalization::Smart, AtomKind::Fuzzy);
+            let mut matcher = nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT);
+            let mut buf = Vec::new();
+
+            let mut scored: Vec<(usize, u32)> = self
+                .notes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| {
+                    self.active_folder
+                        .as_ref()
+                        .is_none_or(|f| n.folder == *f)
+                })
+                .filter_map(|(i, n)| {
+                    let haystack = format!("{}/{}", n.folder, n.name);
+                    let score = pattern.score(
+                        nucleo_matcher::Utf32Str::new(&haystack, &mut buf),
+                        &mut matcher,
+                    )?;
+                    Some((i, score))
+                })
+                .collect();
+
+            scored.sort_by(|a, b| b.1.cmp(&a.1));
+            self.filtered = scored.into_iter().map(|(i, _)| i).collect();
+        }
 
         if self.filtered.is_empty() {
             self.list_state.select(None);
