@@ -3,7 +3,7 @@ use crate::editor;
 use crate::notes::{self, Note};
 use crate::theme::{self, Theme};
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
@@ -52,6 +52,7 @@ struct App {
     confirm_folder_delete: bool,
     body_cache: HashMap<String, String>,
     body_rx: mpsc::Receiver<Vec<(String, String)>>,
+    list_height: usize,
 }
 
 impl App {
@@ -84,6 +85,7 @@ impl App {
             confirm_folder_delete: false,
             body_cache: HashMap::new(),
             body_rx,
+            list_height: 10,
         }
     }
 
@@ -265,6 +267,12 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             }
 
             match app.mode {
+                Mode::Browse if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.move_page_down(app.list_height);
+                }
+                Mode::Browse if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.move_page_up(app.list_height);
+                }
                 Mode::Browse => match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                     KeyCode::Char('j') | KeyCode::Down => app.move_down(),
@@ -272,8 +280,8 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('G') => app.move_bottom(),
                     KeyCode::Home => app.move_top(),
                     KeyCode::End => app.move_bottom(),
-                    KeyCode::PageUp => app.move_page_up(10),
-                    KeyCode::PageDown => app.move_page_down(10),
+                    KeyCode::PageUp => app.move_page_up(app.list_height),
+                    KeyCode::PageDown => app.move_page_down(app.list_height),
                     KeyCode::Char('/') => {
                         app.mode = Mode::Search;
                     }
@@ -683,6 +691,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         )
         .highlight_symbol("▸ ");
 
+    app.list_height = main_chunks[0].height.saturating_sub(2) as usize;
     frame.render_stateful_widget(list, main_chunks[0], &mut app.list_state);
 
     // Preview pane
