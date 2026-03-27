@@ -128,6 +128,33 @@ impl App {
         }
     }
 
+    fn move_top(&mut self) {
+        if !self.filtered.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    fn move_bottom(&mut self) {
+        if !self.filtered.is_empty() {
+            self.list_state.select(Some(self.filtered.len() - 1));
+        }
+    }
+
+    fn move_page_up(&mut self, page_size: usize) {
+        if let Some(selected) = self.list_state.selected() {
+            self.list_state
+                .select(Some(selected.saturating_sub(page_size)));
+        }
+    }
+
+    fn move_page_down(&mut self, page_size: usize) {
+        if let Some(selected) = self.list_state.selected() {
+            let last = self.filtered.len().saturating_sub(1);
+            self.list_state
+                .select(Some((selected + page_size).min(last)));
+        }
+    }
+
     fn refresh(&mut self) {
         if let Ok(refreshed) = notes::list_notes(None) {
             self.notes = refreshed;
@@ -178,6 +205,11 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                     KeyCode::Char('j') | KeyCode::Down => app.move_down(),
                     KeyCode::Char('k') | KeyCode::Up => app.move_up(),
+                    KeyCode::Char('G') => app.move_bottom(),
+                    KeyCode::Home => app.move_top(),
+                    KeyCode::End => app.move_bottom(),
+                    KeyCode::PageUp => app.move_page_up(10),
+                    KeyCode::PageDown => app.move_page_down(10),
                     KeyCode::Char('/') => {
                         app.mode = Mode::Search;
                     }
@@ -195,7 +227,8 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                             app.mode = Mode::MovePicker;
                         }
                     }
-                    KeyCode::Char('g') => {
+                    KeyCode::Char('g') => app.move_top(),
+                    KeyCode::Char('f') => {
                         app.load_folders();
                         app.folder_selected = match &app.active_folder {
                             Some(name) => app
@@ -323,6 +356,22 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                             app.theme = theme::ALL_THEMES[app.theme_selected].1;
                         }
                     }
+                    KeyCode::Home => {
+                        app.theme_selected = 0;
+                        app.theme = theme::ALL_THEMES[0].1;
+                    }
+                    KeyCode::End | KeyCode::Char('G') => {
+                        app.theme_selected = theme::ALL_THEMES.len() - 1;
+                        app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                    }
+                    KeyCode::PageUp => {
+                        app.theme_selected = app.theme_selected.saturating_sub(10);
+                        app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                    }
+                    KeyCode::PageDown => {
+                        app.theme_selected = (app.theme_selected + 10).min(theme::ALL_THEMES.len() - 1);
+                        app.theme = theme::ALL_THEMES[app.theme_selected].1;
+                    }
                     KeyCode::Enter => {
                         let (name, selected_theme) = theme::ALL_THEMES[app.theme_selected];
                         app.theme = selected_theme;
@@ -334,7 +383,7 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     _ => {}
                 },
                 Mode::FolderPicker => match key.code {
-                    KeyCode::Esc | KeyCode::Char('g') => {
+                    KeyCode::Esc | KeyCode::Char('f') => {
                         app.confirm_folder_delete = false;
                         app.mode = Mode::Browse;
                     }
@@ -348,6 +397,19 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                         if app.folder_selected > 0 {
                             app.folder_selected -= 1;
                         }
+                    }
+                    KeyCode::Home if !app.confirm_folder_delete => {
+                        app.folder_selected = 0;
+                    }
+                    KeyCode::End | KeyCode::Char('G') if !app.confirm_folder_delete => {
+                        app.folder_selected = app.folders.len(); // last item (folders.len() = "All" + folders - 1)
+                    }
+                    KeyCode::PageUp if !app.confirm_folder_delete => {
+                        app.folder_selected = app.folder_selected.saturating_sub(10);
+                    }
+                    KeyCode::PageDown if !app.confirm_folder_delete => {
+                        let total = app.folders.len() + 1;
+                        app.folder_selected = (app.folder_selected + 10).min(total - 1);
                     }
                     KeyCode::Enter if !app.confirm_folder_delete => {
                         if app.folder_selected == 0 {
@@ -436,6 +498,22 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::Char('k') | KeyCode::Up => {
                         if app.move_selected > 0 {
                             app.move_selected -= 1;
+                        }
+                    }
+                    KeyCode::Home => {
+                        app.move_selected = 0;
+                    }
+                    KeyCode::End | KeyCode::Char('G') => {
+                        if !app.folders.is_empty() {
+                            app.move_selected = app.folders.len() - 1;
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        app.move_selected = app.move_selected.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        if !app.folders.is_empty() {
+                            app.move_selected = (app.move_selected + 10).min(app.folders.len() - 1);
                         }
                     }
                     KeyCode::Enter => {
@@ -569,7 +647,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
     let area = frame.area();
     let width = 40u16.min(area.width.saturating_sub(4));
-    let height = 19u16.min(area.height.saturating_sub(4));
+    let height = 22u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -581,6 +659,18 @@ fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
         Line::from(vec![
             Span::styled("  ↑↓ / j k  ", Style::default().fg(t.accent)),
             Span::styled("Navigate notes", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  g / Home   ", Style::default().fg(t.accent)),
+            Span::styled("Jump to top", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  G / End    ", Style::default().fg(t.accent)),
+            Span::styled("Jump to bottom", Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgUp/PgDn  ", Style::default().fg(t.accent)),
+            Span::styled("Scroll by page", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
             Span::styled("  ⏎ Enter   ", Style::default().fg(t.accent)),
@@ -603,7 +693,7 @@ fn draw_help(frame: &mut ratatui::Frame, t: &Theme) {
             Span::styled("Move to folder", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
-            Span::styled("  g         ", Style::default().fg(t.accent)),
+            Span::styled("  f         ", Style::default().fg(t.accent)),
             Span::styled("Folders (n/r/d to manage)", Style::default().fg(t.text)),
         ]),
         Line::from(vec![
