@@ -15,6 +15,7 @@ run:
 # Install to ~/.local/bin
 install: release
     cp target/release/tome ~/.local/bin/
+    codesign --force --sign - target/release/tome
 
 # Uninstall from ~/.local/bin
 uninstall:

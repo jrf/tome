@@ -5,15 +5,12 @@ use crate::theme::{self, Theme};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
-use crossterm::execute;
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::DefaultTerminal;
 use std::collections::HashMap;
-use std::io::stdout;
 use std::sync::mpsc;
 use std::thread;
 
@@ -237,15 +234,11 @@ pub fn run(theme: Theme) -> Result<()> {
 
     let mut app = App::new(notes, theme, rx);
 
-    terminal::enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
     let mut terminal = ratatui::init();
 
     let result = run_loop(&mut terminal, &mut app);
 
     ratatui::restore();
-    execute!(stdout(), LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
 
     result
 }
@@ -334,8 +327,6 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     }
                     KeyCode::Char('n') => {
                         ratatui::restore();
-                        execute!(stdout(), LeaveAlternateScreen)?;
-                        terminal::disable_raw_mode()?;
 
                         if let Ok(edited) = editor::edit("", "tome_new.md") {
                             let edited = edited.trim().to_string();
@@ -348,8 +339,6 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                             }
                         }
 
-                        terminal::enable_raw_mode()?;
-                        execute!(stdout(), EnterAlternateScreen)?;
                         *terminal = ratatui::init();
                         app.refresh();
                     }
@@ -357,8 +346,6 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                         if let Some(note) = app.selected_note() {
                             let name = note.name.clone();
                             ratatui::restore();
-                            execute!(stdout(), LeaveAlternateScreen)?;
-                            terminal::disable_raw_mode()?;
 
                             if let Ok(full_note) = notes::get_note(&name) {
                                 let content = format!("{}\n\n{}", full_note.name, full_note.body);
@@ -374,8 +361,6 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                                 }
                             }
 
-                            terminal::enable_raw_mode()?;
-                            execute!(stdout(), EnterAlternateScreen)?;
                             *terminal = ratatui::init();
                             app.refresh();
                         }
