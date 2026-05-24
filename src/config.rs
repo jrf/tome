@@ -32,14 +32,7 @@ impl Config {
     }
 
     pub fn images_enabled(&self) -> bool {
-        if let Some(v) = self.images {
-            return v;
-        }
-        viuer::KittySupport::None != viuer::get_kitty_support()
-            || viuer::is_iterm_supported()
-            || std::env::var("TERM")
-                .map(|t| t.contains("kitty"))
-                .unwrap_or(false)
+        self.images.unwrap_or(false)
     }
 
     pub fn library_dir(&self) -> PathBuf {
