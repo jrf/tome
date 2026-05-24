@@ -65,7 +65,8 @@ tome rm <slug> --yes                  # skip confirmation
 ~/Bookmarks/
   example-com-attention/
     info.toml
-    snapshot.html        # optional
+    article.txt          # readability-extracted text (optional)
+    preview.jpg          # og:image (optional)
   arxiv-org-1706-03762/
     info.toml
 ```

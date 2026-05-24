@@ -81,10 +81,6 @@ pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
 
     let dir = storage::create_bookmark_dir(library, &bookmark)?;
 
-    if let Err(e) = save_snapshot(&dir, &fetched.html) {
-        eprintln!("warning: snapshot save failed: {}", e);
-    }
-
     if let Some(text) = fetch::extract_article(&fetched.html, &bookmark.url) {
         let _ = std::fs::write(dir.join("article.txt"), text);
     }
@@ -107,17 +103,6 @@ pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
 
     println!("Added: {}", bookmark.title);
     println!("  → {}", dir.display());
-    Ok(())
-}
-
-fn save_snapshot(dir: &Path, html: &str) -> Result<()> {
-    use flate2::Compression;
-    use flate2::write::GzEncoder;
-    use std::io::Write;
-    let file = std::fs::File::create(dir.join("snapshot.html.gz"))?;
-    let mut encoder = GzEncoder::new(file, Compression::default());
-    encoder.write_all(html.as_bytes())?;
-    encoder.finish()?;
     Ok(())
 }
 

@@ -16,6 +16,8 @@
 
 ## Scrapped
 
+- HTML snapshot archive (`snapshot.html.gz` on add) — the gzipped page was never displayed in tome (no in-TUI HTML renderer, and `article.txt` covers the reading case), so the disk cost wasn't earning its keep.
+
 ## Done
 
 - [x] Delete bookmarks (TUI `D` with confirm, `tome rm <slug>` with `--yes`) #feature

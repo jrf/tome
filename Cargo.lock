@@ -3569,7 +3569,6 @@ dependencies = [
  "crossterm 0.28.1",
  "dirs",
  "dom_smoothie",
- "flate2",
  "image",
  "nucleo-matcher",
  "ratatui",
