@@ -87,6 +87,13 @@ pub struct App {
     preview_image_path: Option<std::path::PathBuf>,
     preview_image_area: Option<ratatui::layout::Rect>,
     last_blit_key: Option<(std::path::PathBuf, ratatui::layout::Rect)>,
+    reader_view: Option<ReaderView>,
+}
+
+struct ReaderView {
+    title: String,
+    text: String,
+    scroll: u16,
 }
 
 struct ValidatePopup {
@@ -212,7 +219,7 @@ impl ThemePopup {
         let mut names = Vec::new();
         let theme_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("bm")
+            .join("tome")
             .join("themes");
         if let Ok(entries) = std::fs::read_dir(&theme_dir) {
             names = entries
@@ -379,6 +386,34 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
         if let Event::Key(key) = event::read()? {
             if app.show_help {
                 app.show_help = false;
+                continue;
+            }
+
+            if let Some(ref mut rv) = app.reader_view {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        app.reader_view = None;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        rv.scroll = rv.scroll.saturating_add(1);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        rv.scroll = rv.scroll.saturating_sub(1);
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        rv.scroll = rv.scroll.saturating_add(10);
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        rv.scroll = rv.scroll.saturating_sub(10);
+                    }
+                    KeyCode::Char(' ') => {
+                        rv.scroll = rv.scroll.saturating_add(20);
+                    }
+                    KeyCode::Char('g') => {
+                        rv.scroll = 0;
+                    }
+                    _ => {}
+                }
                 continue;
             }
 
@@ -639,6 +674,9 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     (KeyCode::Char('?'), _) => {
                         app.show_help = true;
                     }
+                    (KeyCode::Char(' '), _) => {
+                        app.action_open_reader();
+                    }
                     _ => {}
                 },
             }
@@ -690,6 +728,7 @@ impl App {
             preview_image_path: None,
             preview_image_area: None,
             last_blit_key: None,
+            reader_view: None,
         };
 
         app.rebuild_filter();
@@ -865,6 +904,30 @@ impl App {
         }
     }
 
+    fn action_open_reader(&mut self) {
+        let entry = match self.selected_entry() {
+            Some(e) => e,
+            None => return,
+        };
+        let article_path = entry.dir.join("article.txt");
+        let title = entry.bookmark.title.clone();
+        match std::fs::read_to_string(&article_path) {
+            Ok(text) if !text.trim().is_empty() => {
+                self.reader_view = Some(ReaderView {
+                    title,
+                    text,
+                    scroll: 0,
+                });
+            }
+            _ => {
+                self.flash = Some((
+                    "No article text saved".to_string(),
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+    }
+
     fn action_edit(&mut self, terminal: &mut Term, tty_ctl: &mut File) -> Result<()> {
         let entry = match self.selected_entry() {
             Some(e) => e,
@@ -947,7 +1010,7 @@ impl App {
 
         self.flash = Some(("Adding...".to_string(), std::time::Instant::now()));
 
-        let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("bm"));
+        let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tome"));
         let output = std::process::Command::new(bin).arg("add").arg(&input).output();
 
         match output {
@@ -1244,24 +1307,24 @@ fn enrich_bookmark(b: &Bookmark, dir: &Path) -> Result<Option<Bookmark>> {
         Ok(f) => f,
         Err(_) => return Ok(None),
     };
-    let fetched_bm = fetched.bookmark;
+    let fetched_bookmark = fetched.bookmark;
 
     let mut updated = b.clone();
 
     if updated.title.is_empty() || updated.title == updated.url {
-        updated.title = fetched_bm.title;
+        updated.title = fetched_bookmark.title;
     }
     if updated.description.is_none() {
-        updated.description = fetched_bm.description;
+        updated.description = fetched_bookmark.description;
     }
     if updated.authors.is_empty() {
-        updated.authors = fetched_bm.authors;
+        updated.authors = fetched_bookmark.authors;
     }
     if updated.site.is_none() {
-        updated.site = fetched_bm.site;
+        updated.site = fetched_bookmark.site;
     }
     if updated.year.is_none() {
-        updated.year = fetched_bm.year;
+        updated.year = fetched_bookmark.year;
     }
 
     if updated.preview.is_none()
@@ -1279,11 +1342,15 @@ fn enrich_bookmark(b: &Bookmark, dir: &Path) -> Result<Option<Bookmark>> {
 
 fn blit_preview_image(app: &mut App, tty_ctl: &mut File) {
     use std::io::Write;
-    let key = app
-        .preview_image_path
-        .as_ref()
-        .zip(app.preview_image_area)
-        .map(|(p, r)| (p.clone(), r));
+    let suppress = app.reader_view.is_some();
+    let key = if suppress {
+        None
+    } else {
+        app.preview_image_path
+            .as_ref()
+            .zip(app.preview_image_area)
+            .map(|(p, r)| (p.clone(), r))
+    };
 
     if key == app.last_blit_key {
         return;
@@ -1722,6 +1789,41 @@ fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(lines).scroll((vp.scroll, 0)), inner);
     }
 
+    if let Some(ref rv) = app.reader_view {
+        let area = f.area();
+        f.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(t.popup_bg))
+            .border_style(Style::default().fg(t.popup_border))
+            .title(Line::from(Span::styled(
+                format!(" {} ", rv.title),
+                s_hl.add_modifier(Modifier::BOLD),
+            )))
+            .title_bottom(
+                Line::from(vec![
+                    Span::styled(" j/k", s_author),
+                    Span::styled(" scroll  ", s_dim),
+                    Span::styled("space", s_author),
+                    Span::styled(" page down  ", s_dim),
+                    Span::styled("g", s_author),
+                    Span::styled(" top  ", s_dim),
+                    Span::styled("q/esc", s_author),
+                    Span::styled(" close ", s_dim),
+                ])
+                .alignment(ratatui::layout::Alignment::Right),
+            );
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        f.render_widget(
+            Paragraph::new(rv.text.as_str())
+                .style(s_text)
+                .wrap(Wrap { trim: false })
+                .scroll((rv.scroll, 0)),
+            inner,
+        );
+    }
+
     if app.show_help {
         let help_lines = vec![
             ("", "Browse mode"),
@@ -1735,6 +1837,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             ("e", "Edit info.toml"),
             ("y", "Copy URL"),
             ("Y", "Copy as markdown link"),
+            ("space", "Open reader (article text)"),
             ("a", "Add bookmark (URL)"),
             ("r", "Refetch metadata for selected"),
             ("R", "Refetch metadata for all w/ missing fields"),

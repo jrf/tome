@@ -8,7 +8,7 @@ use crate::metadata;
 use crate::model::Bookmark;
 
 const USER_AGENT: &str =
-    "Mozilla/5.0 (compatible; bm/0.1; +https://github.com/jrfetzer/bm)";
+    "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrfetzer/tome)";
 
 const MAX_IMAGE_BYTES: u64 = 4 * 1024 * 1024;
 const PREVIEW_MAX_WIDTH: u32 = 800;
@@ -17,6 +17,7 @@ const PREVIEW_JPEG_QUALITY: u8 = 80;
 pub struct FetchResult {
     pub bookmark: Bookmark,
     pub image_url: Option<String>,
+    pub html: String,
 }
 
 pub fn fetch_url(input: &str) -> Result<FetchResult> {
@@ -49,7 +50,21 @@ pub fn fetch_url(input: &str) -> Result<FetchResult> {
     }
 
     let image_url = raw_image.and_then(|raw| resolve_url(&parsed, &raw));
-    Ok(FetchResult { bookmark, image_url })
+    Ok(FetchResult {
+        bookmark,
+        image_url,
+        html: body,
+    })
+}
+
+pub fn extract_article(html: &str, url: &str) -> Option<String> {
+    use dom_smoothie::{Config, Readability};
+    let parsed_url = Url::parse(url).ok()?;
+    let mut readability =
+        Readability::new(html, Some(parsed_url.as_str()), Some(Config::default())).ok()?;
+    let article = readability.parse().ok()?;
+    let text = article.text_content.trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 pub fn parse_html(body: &str) -> (Bookmark, Option<String>) {

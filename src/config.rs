@@ -41,7 +41,7 @@ impl Config {
     }
 
     pub fn library_dir(&self) -> PathBuf {
-        if let Ok(val) = std::env::var("BM_LIBRARY") {
+        if let Ok(val) = std::env::var("TOME_LIBRARY") {
             return PathBuf::from(val);
         }
         if let Some(ref lib) = self.library {
@@ -61,7 +61,7 @@ impl Config {
     }
 
     pub fn browser(&self) -> String {
-        std::env::var("BM_BROWSER")
+        std::env::var("TOME_BROWSER")
             .ok()
             .or_else(|| self.browser.clone())
             .unwrap_or_else(|| "open".to_string())
@@ -70,7 +70,7 @@ impl Config {
     fn config_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("bm")
+            .join("tome")
             .join("config.toml")
     }
 }

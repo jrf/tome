@@ -23,6 +23,6 @@ clean:
     cargo clean
 
 install: release
-    @cp target/release/bm ~/.local/bin/bm
-    @if [ "$(uname)" = "Darwin" ]; then codesign -s - ~/.local/bin/bm; fi
-    @echo "Installed → ~/.local/bin/bm"
+    @cp target/release/tome ~/.local/bin/tome
+    @if [ "$(uname)" = "Darwin" ]; then codesign -s - ~/.local/bin/tome; fi
+    @echo "Installed → ~/.local/bin/tome"

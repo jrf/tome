@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand};
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "bm", about = "A fast TUI bookmark manager")]
+#[command(name = "tome", about = "A fast TUI bookmark manager")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -65,11 +65,20 @@ fn main() -> Result<()> {
 
 pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
     std::fs::create_dir_all(library)?;
+    ensure_library_gitignore(library);
 
     let fetched = fetch::fetch_url(input)?;
     let mut bookmark = fetched.bookmark;
 
     let dir = storage::create_bookmark_dir(library, &bookmark)?;
+
+    if let Err(e) = save_snapshot(&dir, &fetched.html) {
+        eprintln!("warning: snapshot save failed: {}", e);
+    }
+
+    if let Some(text) = fetch::extract_article(&fetched.html, &bookmark.url) {
+        let _ = std::fs::write(dir.join("article.txt"), text);
+    }
 
     if let Some(ref img_url) = fetched.image_url {
         match fetch::download_preview(img_url) {
@@ -90,6 +99,26 @@ pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
     println!("Added: {}", bookmark.title);
     println!("  → {}", dir.display());
     Ok(())
+}
+
+fn save_snapshot(dir: &Path, html: &str) -> Result<()> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+    let file = std::fs::File::create(dir.join("snapshot.html.gz"))?;
+    let mut encoder = GzEncoder::new(file, Compression::default());
+    encoder.write_all(html.as_bytes())?;
+    encoder.finish()?;
+    Ok(())
+}
+
+fn ensure_library_gitignore(library: &Path) {
+    let path = library.join(".gitignore");
+    if path.exists() {
+        return;
+    }
+    let contents = ".tome.db\n.tome.db-wal\n.tome.db-shm\n.trash/\n";
+    let _ = std::fs::write(path, contents);
 }
 
 pub fn index_bookmark(library: &Path, dir: &Path, bookmark: &crate::model::Bookmark) {

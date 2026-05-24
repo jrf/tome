@@ -1,11 +1,11 @@
-# bm
+# tome
 
 A fast TUI bookmark manager for web URLs.
 
 The filesystem is the source of truth — each bookmark is a directory containing
 an `info.toml` metadata file (and optionally a saved HTML snapshot). SQLite
 (with FTS5) serves as a disposable search index, fully rebuildable from the
-filesystem at any time via `bm reindex`.
+filesystem at any time via `tome reindex`.
 
 ## Install
 
@@ -24,12 +24,12 @@ just install
 ## Usage
 
 ```
-bm                                  # browse library
-bm rust                             # browse with "rust" pre-filled
-bm add https://example.com/article  # fetch metadata, add bookmark
-bm reindex                          # rebuild search index from filesystem
-bm validate                         # check library integrity
-bm validate --fix                   # auto-fix issues
+tome                                  # browse library
+tome rust                             # browse with "rust" pre-filled
+tome add https://example.com/article  # fetch metadata, add bookmark
+tome reindex                          # rebuild search index from filesystem
+tome validate                         # check library integrity
+tome validate --fix                   # auto-fix issues
 ```
 
 ### TUI keybindings
@@ -85,15 +85,15 @@ files = []  # optional snapshot files
 
 ## Configuration
 
-Optional. bm works without any config file.
+Optional. tome works without any config file.
 
-`~/.config/bm/config.toml`:
+`~/.config/tome/config.toml`:
 
 ```toml
 library = "~/Bookmarks"     # default
 editor = "hx"               # defaults to $EDITOR
-browser = "open"            # defaults to $BM_BROWSER or "open"
+browser = "open"            # defaults to $TOME_BROWSER or "open"
 theme = "tokyo-night-moon"  # default
 ```
 
-Environment variables: `$BM_LIBRARY`, `$BM_BROWSER`, `$EDITOR`.
+Environment variables: `$TOME_LIBRARY`, `$TOME_BROWSER`, `$EDITOR`.
