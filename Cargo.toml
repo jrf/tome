@@ -1,0 +1,24 @@
+[package]
+name = "bm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
+dirs = "6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+nucleo-matcher = "0.3"
+ratatui = "0.30"
+regex = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
+rusqlite = { version = "0.35", features = ["bundled"] }
+scraper = "0.20"
+serde = { version = "1", features = ["derive"] }
+shellexpand = "3"
+slug = "0.1"
+toml = "0.8"
+url = "2"
+viuer = { version = "0.9", features = ["print-file"] }
