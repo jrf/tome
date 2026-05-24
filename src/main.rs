@@ -41,6 +41,14 @@ enum Command {
         #[arg(short, long)]
         fix: bool,
     },
+    /// Delete a bookmark by directory slug
+    Rm {
+        /// Bookmark directory slug (e.g. example-com-attention)
+        slug: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -60,6 +68,7 @@ fn main() -> Result<()> {
         Some(Command::Add { url }) => cmd_add(&library, &url),
         Some(Command::Reindex) => cmd_reindex(&library),
         Some(Command::Validate { fix }) => validate::run(&library, fix),
+        Some(Command::Rm { slug, yes }) => cmd_rm(&library, &slug, yes),
     }
 }
 
@@ -130,6 +139,37 @@ pub fn index_bookmark(library: &Path, dir: &Path, bookmark: &crate::model::Bookm
             .to_string();
         let _ = idx.upsert(&dir_name, bookmark);
     }
+}
+
+fn cmd_rm(library: &Path, slug: &str, yes: bool) -> Result<()> {
+    let dir = library.join(slug);
+    if !dir.is_dir() || !dir.join("info.toml").exists() {
+        anyhow::bail!("No bookmark found at {}", dir.display());
+    }
+
+    let title = metadata::read_info(&dir)
+        .map(|b| b.title)
+        .unwrap_or_else(|_| slug.to_string());
+
+    if !yes {
+        use std::io::Write;
+        print!("Delete \"{}\" ({})? [y/N] ", title, slug);
+        std::io::stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if !matches!(answer.trim(), "y" | "Y" | "yes") {
+            println!("Cancelled.");
+            return Ok(());
+        }
+    }
+
+    storage::delete_bookmark_dir(&dir)?;
+    if let Ok(idx) = index::Index::open(library) {
+        let _ = idx.delete(slug);
+    }
+
+    println!("Deleted: {}", title);
+    Ok(())
 }
 
 fn cmd_reindex(library: &Path) -> Result<()> {

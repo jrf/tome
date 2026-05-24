@@ -88,6 +88,13 @@ pub struct App {
     preview_image_area: Option<ratatui::layout::Rect>,
     last_blit_key: Option<(std::path::PathBuf, ratatui::layout::Rect)>,
     reader_view: Option<ReaderView>,
+    delete_confirm: Option<DeleteConfirm>,
+}
+
+struct DeleteConfirm {
+    idx: usize,
+    title: String,
+    dir_name: String,
 }
 
 struct ReaderView {
@@ -443,6 +450,18 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                 continue;
             }
 
+            if app.delete_confirm.is_some() {
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                        app.confirm_delete();
+                    }
+                    _ => {
+                        app.delete_confirm = None;
+                    }
+                }
+                continue;
+            }
+
             if app.add_input.is_some() {
                 match key.code {
                     KeyCode::Esc => {
@@ -693,6 +712,9 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     (KeyCode::Char('d'), KeyModifiers::NONE) => {
                         run_dedup(terminal, app)?;
                     }
+                    (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                        app.action_delete_prompt();
+                    }
                     (KeyCode::Char('I'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
                         app.action_reindex();
                     }
@@ -769,6 +791,7 @@ impl App {
             preview_image_area: None,
             last_blit_key: None,
             reader_view: None,
+            delete_confirm: None,
         };
 
         app.rebuild_filter();
@@ -970,6 +993,60 @@ impl App {
                     "No article text saved".to_string(),
                     std::time::Instant::now(),
                 ));
+            }
+        }
+    }
+
+    fn action_delete_prompt(&mut self) {
+        let selected = match self.list_state.selected() {
+            Some(s) => s,
+            None => return,
+        };
+        let idx = match self.filtered_indices.get(selected) {
+            Some(&i) => i,
+            None => return,
+        };
+        let entry = &self.entries[idx];
+        let dir_name = entry
+            .dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        self.delete_confirm = Some(DeleteConfirm {
+            idx,
+            title: entry.bookmark.title.clone(),
+            dir_name,
+        });
+    }
+
+    fn confirm_delete(&mut self) {
+        let confirm = match self.delete_confirm.take() {
+            Some(c) => c,
+            None => return,
+        };
+        let dir = self.entries[confirm.idx].dir.clone();
+        match storage::delete_bookmark_dir(&dir) {
+            Ok(()) => {
+                let library = self.config.library_dir();
+                if let Ok(idx) = index::Index::open(&library) {
+                    let _ = idx.delete(&confirm.dir_name);
+                }
+                self.reload_entries();
+                let visible = self.filtered_indices.len();
+                if visible == 0 {
+                    self.list_state.select(None);
+                } else {
+                    let pos = self.list_state.selected().unwrap_or(0).min(visible - 1);
+                    self.list_state.select(Some(pos));
+                }
+                self.flash = Some((
+                    format!("Deleted: {}", confirm.title),
+                    std::time::Instant::now(),
+                ));
+            }
+            Err(e) => {
+                self.flash = Some((format!("Delete failed: {}", e), std::time::Instant::now()));
             }
         }
     }
@@ -1969,6 +2046,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             ("R", "Refetch metadata for all w/ missing fields"),
             ("s", "Cycle sort (added/site/title/year)"),
             ("d", "Deduplicate library"),
+            ("D", "Delete selected bookmark"),
             ("I", "Reindex library"),
             ("V", "Validate library (auto-fix)"),
             ("c", "Clear search and tag filter"),
@@ -2026,6 +2104,36 @@ fn draw(f: &mut Frame, app: &mut App) {
 
         let hint = Line::from(Span::styled(" press any key to close", s_muted));
         f.render_widget(Paragraph::new(hint), popup_chunks[1]);
+    }
+
+    if let Some(ref confirm) = app.delete_confirm {
+        let title_line = truncate_ellipsis(&confirm.title, 60);
+        let width = (title_line.len() as u16 + 6)
+            .max(40)
+            .min(area.width.saturating_sub(4));
+        let height: u16 = 6;
+        let x = area.width.saturating_sub(width) / 2;
+        let y = area.height.saturating_sub(height) / 2;
+        let popup_area = ratatui::layout::Rect::new(x, y, width, height);
+
+        f.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(t.popup_bg))
+            .border_style(Style::default().fg(t.popup_border))
+            .title(" Delete bookmark? ")
+            .title_style(s_author.add_modifier(Modifier::BOLD));
+        let inner = block.inner(popup_area);
+        f.render_widget(block, popup_area);
+
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(format!(" {}", title_line), s_text)),
+            Line::from(""),
+            Line::from(Span::styled(" [y] delete   [n/esc] cancel", s_muted)),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
     }
 }
 

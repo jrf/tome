@@ -25,6 +25,11 @@ pub fn create_bookmark_dir(library: &Path, bookmark: &Bookmark) -> Result<PathBu
     Ok(dir)
 }
 
+pub fn delete_bookmark_dir(dir: &Path) -> Result<()> {
+    std::fs::remove_dir_all(dir)
+        .with_context(|| format!("Failed to delete {}", dir.display()))
+}
+
 pub fn list_bookmark_dirs(library: &Path) -> Result<Vec<PathBuf>> {
     let mut dirs = Vec::new();
     if !library.exists() {

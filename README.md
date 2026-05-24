@@ -30,6 +30,8 @@ tome add https://example.com/article  # fetch metadata, add bookmark
 tome reindex                          # rebuild search index from filesystem
 tome validate                         # check library integrity
 tome validate --fix                   # auto-fix issues
+tome rm <slug>                        # delete bookmark by directory slug
+tome rm <slug> --yes                  # skip confirmation
 ```
 
 ### TUI keybindings
@@ -48,6 +50,7 @@ tome validate --fix                   # auto-fix issues
 | `R`      | Enrich all with missing fields        |
 | `s`      | Cycle sort (added/site/title/year)    |
 | `d`      | Deduplicate library                   |
+| `D`      | Delete selected bookmark              |
 | `I`      | Reindex library                       |
 | `V`      | Validate library (auto-fix)           |
 | `t`      | Browse tags                           |

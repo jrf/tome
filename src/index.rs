@@ -103,6 +103,12 @@ impl Index {
         Ok(count)
     }
 
+    pub fn delete(&self, dir_name: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM bookmark WHERE dir_name = ?1", params![dir_name])?;
+        Ok(())
+    }
+
     pub fn upsert(&self, dir_name: &str, b: &crate::model::Bookmark) -> Result<()> {
         self.conn.execute(
             "INSERT INTO bookmark (dir_name, url, title, description, authors, site, year, tags, added, files)

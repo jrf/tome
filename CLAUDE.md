@@ -21,7 +21,7 @@ Architecturally, tome closely mirrors [grimoire](../grimoire) — a paper refere
 
 ### Module overview
 
-- **main.rs** — CLI entry point (clap). Bare invocation opens the TUI; subcommands `add`, `reindex`, `validate`.
+- **main.rs** — CLI entry point (clap). Bare invocation opens the TUI; subcommands `add`, `reindex`, `validate`, `rm`.
 - **model.rs** — `Bookmark` struct. The core data type used by every other module.
 - **tui.rs** — Interactive TUI (ratatui). Browse/Search modes, fuzzy filtering, tag/theme popups, dedup workflow, preview pane.
 - **storage.rs** — Filesystem operations: create bookmark directories (`{site}-{title}`), list bookmark dirs.
