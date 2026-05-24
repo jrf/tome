@@ -48,8 +48,8 @@ fn make_dir_name(bookmark: &Bookmark) -> String {
         .map(strip_site)
         .unwrap_or_else(|| "site".to_string());
 
-    let title_word = first_meaningful_word(&bookmark.title)
-        .unwrap_or_else(|| "untitled".to_string());
+    let title_word =
+        first_meaningful_word(&bookmark.title).unwrap_or_else(|| "untitled".to_string());
 
     slugify(format!("{}-{}", site, title_word))
 }
@@ -70,7 +70,17 @@ fn first_meaningful_word(title: &str) -> Option<String> {
             let lower = w.to_lowercase();
             !matches!(
                 lower.as_str(),
-                "a" | "an" | "the" | "on" | "of" | "for" | "in" | "to" | "and" | "with" | "how" | "why"
+                "a" | "an"
+                    | "the"
+                    | "on"
+                    | "of"
+                    | "for"
+                    | "in"
+                    | "to"
+                    | "and"
+                    | "with"
+                    | "how"
+                    | "why"
             )
         })
         .map(|s| s.to_string())

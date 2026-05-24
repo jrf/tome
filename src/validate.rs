@@ -18,7 +18,11 @@ impl ValidateResult {
         } else if self.fixed > 0 && self.issues.is_empty() {
             format!("Fixed {} issues", self.fixed)
         } else if self.fixed > 0 {
-            format!("{} issues, fixed {}", self.issues.len() + self.fixed, self.fixed)
+            format!(
+                "{} issues, fixed {}",
+                self.issues.len() + self.fixed,
+                self.fixed
+            )
         } else {
             format!("{} issues found", self.issues.len())
         }
@@ -32,7 +36,11 @@ pub fn validate(library: &Path, fix: bool) -> Result<ValidateResult> {
     let mut fixed = 0u32;
 
     for dir in &dirs {
-        let dir_name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let dir_name = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
         let mut bookmark = match metadata::read_info(dir) {
             Ok(b) => b,

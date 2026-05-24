@@ -18,6 +18,7 @@
 
 ## Done
 
+- [x] TUI improvements: SEARCH/BROWSE labels, always startup in browse mode, Ctrl-J/K scrolling, Tab/Ctrl-A toggle with URL fallback helper #improvement
 - [x] Initial scaffold of tome bookmark TUI — port grimoire structure for URL bookmarks #feature
 - [x] og:image preview download on add + kitty/iTerm rendering in preview pane via viuer #feature
 - [x] HTML snapshot (gzipped) + readability article.txt saved on add #feature

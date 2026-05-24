@@ -37,7 +37,9 @@ impl Config {
         }
         viuer::KittySupport::None != viuer::get_kitty_support()
             || viuer::is_iterm_supported()
-            || std::env::var("TERM").map(|t| t.contains("kitty")).unwrap_or(false)
+            || std::env::var("TERM")
+                .map(|t| t.contains("kitty"))
+                .unwrap_or(false)
     }
 
     pub fn library_dir(&self) -> PathBuf {

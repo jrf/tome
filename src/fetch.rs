@@ -7,8 +7,7 @@ use url::Url;
 use crate::metadata;
 use crate::model::Bookmark;
 
-const USER_AGENT: &str =
-    "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrf/tome)";
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrf/tome)";
 
 const MAX_IMAGE_BYTES: u64 = 4 * 1024 * 1024;
 const PREVIEW_MAX_WIDTH: u32 = 800;
@@ -75,7 +74,9 @@ pub fn parse_html(body: &str) -> (Bookmark, Option<String>) {
         .or_else(|| meta_name_content(&doc, "title"))
         .or_else(|| {
             let sel = Selector::parse("title").ok()?;
-            doc.select(&sel).next().map(|n| collapse_ws(&n.text().collect::<String>()))
+            doc.select(&sel)
+                .next()
+                .map(|n| collapse_ws(&n.text().collect::<String>()))
         })
         .unwrap_or_default();
 

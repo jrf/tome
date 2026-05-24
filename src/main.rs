@@ -123,7 +123,11 @@ fn ensure_library_gitignore(library: &Path) {
 
 pub fn index_bookmark(library: &Path, dir: &Path, bookmark: &crate::model::Bookmark) {
     if let Ok(idx) = index::Index::open(library) {
-        let dir_name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let dir_name = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let _ = idx.upsert(&dir_name, bookmark);
     }
 }

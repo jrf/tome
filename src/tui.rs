@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::Result;
+use crossterm::ExecutableCommand;
 use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::style::ResetColor;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::ExecutableCommand;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::backend::CrosstermBackend;
@@ -154,7 +154,10 @@ impl TagPopup {
             self.filtered_tags = tags;
         } else {
             let f = self.filter.to_lowercase();
-            self.filtered_tags = tags.into_iter().filter(|t| t.to_lowercase().contains(&f)).collect();
+            self.filtered_tags = tags
+                .into_iter()
+                .filter(|t| t.to_lowercase().contains(&f))
+                .collect();
         }
         if self.selected >= self.filtered_tags.len() {
             self.selected = self.filtered_tags.len().saturating_sub(1);
@@ -345,7 +348,8 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                 Ok(items) => {
                     app.enrich_rx = None;
                     if items.is_empty() {
-                        app.flash = Some(("Nothing to enrich".to_string(), std::time::Instant::now()));
+                        app.flash =
+                            Some(("Nothing to enrich".to_string(), std::time::Instant::now()));
                     } else {
                         let mut queue = items;
                         let (idx, updated, diffs) = queue.remove(0);
@@ -447,12 +451,32 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     KeyCode::Enter => {
                         app.submit_add();
                     }
+                    KeyCode::Tab => {
+                        if let Some(text) = app.add_input.take() {
+                            app.filter = text;
+                            app.rebuild_filter();
+                        }
+                        app.input_mode = InputMode::Search;
+                    }
+                    KeyCode::Char('a')
+                        if key.modifiers.contains(KeyModifiers::ALT)
+                            || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        if let Some(text) = app.add_input.take() {
+                            app.filter = text;
+                            app.rebuild_filter();
+                        }
+                        app.input_mode = InputMode::Search;
+                    }
                     KeyCode::Backspace => {
                         if let Some(ref mut s) = app.add_input {
                             s.pop();
                         }
                     }
-                    KeyCode::Char(c) => {
+                    KeyCode::Char(c)
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    {
                         if let Some(ref mut s) = app.add_input {
                             s.push(c);
                         }
@@ -571,6 +595,16 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                         app.input_mode = InputMode::Browse;
                     }
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => app.should_quit = true,
+
+                    (KeyCode::Char('a'), KeyModifiers::ALT)
+                    | (KeyCode::Char('a'), KeyModifiers::CONTROL)
+                    | (KeyCode::Tab, _) => {
+                        app.add_input = Some(app.filter.clone());
+                        app.filter.clear();
+                        app.rebuild_filter();
+                        app.input_mode = InputMode::Browse;
+                    }
+
                     (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                         app.filter.push(c);
                         app.rebuild_filter();
@@ -579,13 +613,17 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                         app.filter.pop();
                         app.rebuild_filter();
                     }
-                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => app.move_up(),
-                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => app.move_down(),
+                    (KeyCode::Up, _)
+                    | (KeyCode::Char('p'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('k'), KeyModifiers::CONTROL) => app.move_up(),
+                    (KeyCode::Down, _)
+                    | (KeyCode::Char('n'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('j'), KeyModifiers::CONTROL) => app.move_down(),
                     (KeyCode::Char('d'), KeyModifiers::CONTROL) => app.half_page_down(),
                     (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.half_page_up(),
                     (KeyCode::Char('f'), KeyModifiers::CONTROL) => app.page_down(),
                     (KeyCode::Char('b'), KeyModifiers::CONTROL) => app.page_up(),
-                    (KeyCode::Tab, _) => {
+                    (KeyCode::Char('t'), KeyModifiers::CONTROL) => {
                         app.tag_popup =
                             Some(TagPopup::new(&app.all_tags, &app.entries, &app.tag_filter));
                     }
@@ -605,10 +643,12 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     }
                     (KeyCode::Char('j'), KeyModifiers::NONE)
                     | (KeyCode::Down, _)
-                    | (KeyCode::Char('n'), KeyModifiers::CONTROL) => app.move_down(),
+                    | (KeyCode::Char('n'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('j'), KeyModifiers::CONTROL) => app.move_down(),
                     (KeyCode::Char('k'), KeyModifiers::NONE)
                     | (KeyCode::Up, _)
-                    | (KeyCode::Char('p'), KeyModifiers::CONTROL) => app.move_up(),
+                    | (KeyCode::Char('p'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('k'), KeyModifiers::CONTROL) => app.move_up(),
                     (KeyCode::Char('d'), KeyModifiers::CONTROL) => app.half_page_down(),
                     (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.half_page_up(),
                     (KeyCode::Char('f'), KeyModifiers::CONTROL) => app.page_down(),
@@ -709,7 +749,7 @@ impl App {
             list_state: ListState::default(),
             config: config.clone(),
             theme,
-            input_mode: InputMode::Search,
+            input_mode: InputMode::Browse,
             should_quit: false,
             tag_filter: None,
             all_tags,
@@ -883,7 +923,8 @@ impl App {
 
     fn move_to_bottom(&mut self) {
         if !self.filtered_indices.is_empty() {
-            self.list_state.select(Some(self.filtered_indices.len() - 1));
+            self.list_state
+                .select(Some(self.filtered_indices.len() - 1));
             self.preview_scroll = 0;
         }
     }
@@ -898,8 +939,13 @@ impl App {
             self.flash = Some(("No URL".to_string(), std::time::Instant::now()));
             return;
         }
-        match std::process::Command::new(self.config.browser()).arg(&url).spawn() {
-            Ok(_) => self.flash = Some(("Opened in browser".to_string(), std::time::Instant::now())),
+        match std::process::Command::new(self.config.browser())
+            .arg(&url)
+            .spawn()
+        {
+            Ok(_) => {
+                self.flash = Some(("Opened in browser".to_string(), std::time::Instant::now()))
+            }
             Err(e) => self.flash = Some((format!("Error: {}", e), std::time::Instant::now())),
         }
     }
@@ -980,7 +1026,11 @@ impl App {
             self.flash = Some(("No URL".to_string(), std::time::Instant::now()));
             return;
         }
-        let title = if b.title.is_empty() { b.url.as_str() } else { b.title.as_str() };
+        let title = if b.title.is_empty() {
+            b.url.as_str()
+        } else {
+            b.title.as_str()
+        };
         let md = format!("[{}]({})", title, b.url);
         if pipe_to_pbcopy(&md).is_ok() {
             self.flash = Some(("Copied markdown".to_string(), std::time::Instant::now()));
@@ -1011,7 +1061,10 @@ impl App {
         self.flash = Some(("Adding...".to_string(), std::time::Instant::now()));
 
         let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tome"));
-        let output = std::process::Command::new(bin).arg("add").arg(&input).output();
+        let output = std::process::Command::new(bin)
+            .arg("add")
+            .arg(&input)
+            .output();
 
         match output {
             Ok(o) if o.status.success() => {
@@ -1196,12 +1249,7 @@ impl App {
         }
     }
 
-    fn advance_enrich_queue(
-        &mut self,
-        mut queue: Vec<EnrichItem>,
-        applied: usize,
-        skipped: usize,
-    ) {
+    fn advance_enrich_queue(&mut self, mut queue: Vec<EnrichItem>, applied: usize, skipped: usize) {
         if queue.is_empty() {
             let msg = format!("Enriched {}, skipped {}", applied, skipped);
             self.flash = Some((msg, std::time::Instant::now()));
@@ -1238,7 +1286,12 @@ fn make_entry(dir: PathBuf) -> Option<Entry> {
     let dir_name = dir.file_name()?.to_string_lossy().to_string();
     let bookmark = metadata::read_info(&dir).ok()?;
     let display = entry_display(&bookmark);
-    Some(Entry { dir, dir_name, bookmark, display })
+    Some(Entry {
+        dir,
+        dir_name,
+        bookmark,
+        display,
+    })
 }
 
 fn entry_display(b: &Bookmark) -> String {
@@ -1390,6 +1443,14 @@ fn pipe_to_pbcopy(s: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn is_importable(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.starts_with("http://") || trimmed.starts_with("https://")
+}
+
 fn draw(f: &mut Frame, app: &mut App) {
     let t = app.theme;
     let s_text = Style::default().fg(t.text);
@@ -1407,8 +1468,9 @@ fn draw(f: &mut Frame, app: &mut App) {
 
     let (left_col, preview_area) = match resolved {
         ResolvedLayout::Wide => {
-            let chunks = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(area);
+            let chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(area);
             (chunks[0], Some(chunks[1]))
         }
         ResolvedLayout::Tall => {
@@ -1462,12 +1524,18 @@ fn draw(f: &mut Frame, app: &mut App) {
     let count_str = format!(" {}/{} ", app.filtered_indices.len(), app.entries.len());
     let mode_indicator = match app.input_mode {
         InputMode::Browse => Span::styled(
-            " BRW ",
-            Style::default().fg(t.status_fg).bg(t.normal_bg).add_modifier(Modifier::BOLD),
+            " BROWSE ",
+            Style::default()
+                .fg(t.status_fg)
+                .bg(t.normal_bg)
+                .add_modifier(Modifier::BOLD),
         ),
         InputMode::Search => Span::styled(
-            " SRC ",
-            Style::default().fg(t.status_fg).bg(t.insert_bg).add_modifier(Modifier::BOLD),
+            " SEARCH ",
+            Style::default()
+                .fg(t.status_fg)
+                .bg(t.insert_bg)
+                .add_modifier(Modifier::BOLD),
         ),
     };
     let mode_hint = match app.input_mode {
@@ -1483,7 +1551,10 @@ fn draw(f: &mut Frame, app: &mut App) {
     let bottom_left = Line::from(bottom_spans);
 
     let sort_right = if app.sort_mode != SortMode::Added && app.filter.is_empty() {
-        Line::from(Span::styled(format!(" sort: {} ", app.sort_mode.label()), s_hl))
+        Line::from(Span::styled(
+            format!(" sort: {} ", app.sort_mode.label()),
+            s_hl,
+        ))
     } else {
         Line::default()
     };
@@ -1503,39 +1574,85 @@ fn draw(f: &mut Frame, app: &mut App) {
     let prefix_width = 3 + 10 + 16; // marker + date + site
     let title_max = list_width.saturating_sub(prefix_width);
 
-    let items: Vec<ListItem> = app
-        .filtered_indices
-        .iter()
-        .map(|&idx| {
-            let b = &app.entries[idx].bookmark;
+    if app.filtered_indices.is_empty() {
+        let is_query_importable = is_importable(&app.filter);
+        let msg = if is_query_importable {
+            vec![
+                Line::from(Span::styled("No bookmarks match this query.", s_dim)),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "This query looks like an importable URL!",
+                    s_hl.add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Press ", s_dim),
+                    Span::styled("Tab", s_hl.add_modifier(Modifier::BOLD)),
+                    Span::styled(" or ", s_dim),
+                    Span::styled("Ctrl-A", s_hl.add_modifier(Modifier::BOLD)),
+                    Span::styled(" to load it into the Add bar.", s_dim),
+                ]),
+            ]
+        } else {
+            vec![Line::from(Span::styled(
+                "No bookmarks match this query.",
+                s_dim,
+            ))]
+        };
 
-            let date_str = b
-                .added
-                .as_deref()
-                .map(|d| format!(" {} ", truncate_str(d, 10)))
-                .unwrap_or_else(|| "            ".to_string());
+        let num_lines = msg.len();
+        let paragraph = Paragraph::new(msg)
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true });
 
-            let site_str = b
-                .site
-                .as_deref()
-                .map(|s| format!("{:>14}  ", truncate_str(s, 14)))
-                .unwrap_or_else(|| "                ".to_string());
+        // Center vertically inside list_inner
+        let vertical_margin = (list_inner.height as usize).saturating_sub(num_lines) / 2;
+        let hint_area = Layout::vertical([
+            Constraint::Length(vertical_margin as u16),
+            Constraint::Min(num_lines as u16),
+        ])
+        .split(list_inner)[1];
 
-            let title = truncate_ellipsis(&b.title, title_max);
+        f.render_widget(paragraph, hint_area);
+    } else {
+        let items: Vec<ListItem> = app
+            .filtered_indices
+            .iter()
+            .map(|&idx| {
+                let b = &app.entries[idx].bookmark;
 
-            ListItem::new(Line::from(vec![
-                Span::styled(date_str, s_date),
-                Span::styled(site_str, s_author),
-                Span::styled(title, s_text),
-            ]))
-        })
-        .collect();
+                let date_str = b
+                    .added
+                    .as_deref()
+                    .map(|d| format!(" {} ", truncate_str(d, 10)))
+                    .unwrap_or_else(|| "            ".to_string());
 
-    let list = List::new(items)
-        .highlight_style(Style::default().bg(t.selection).add_modifier(Modifier::BOLD))
-        .highlight_symbol(" > ");
+                let site_str = b
+                    .site
+                    .as_deref()
+                    .map(|s| format!("{:>14}  ", truncate_str(s, 14)))
+                    .unwrap_or_else(|| "                ".to_string());
 
-    f.render_stateful_widget(list, list_inner, &mut app.list_state);
+                let title = truncate_ellipsis(&b.title, title_max);
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(date_str, s_date),
+                    Span::styled(site_str, s_author),
+                    Span::styled(title, s_text),
+                ]))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(t.selection)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" > ");
+
+        f.render_stateful_widget(list, list_inner, &mut app.list_state);
+    }
 
     if let Some(pane_area) = preview_area {
         let preview_title = app
@@ -1617,7 +1734,10 @@ fn draw(f: &mut Frame, app: &mut App) {
                 let is_selected = i == popup.selected;
                 let prefix = if is_selected { " > " } else { "   " };
                 let style = if is_selected {
-                    Style::default().fg(t.text).bg(t.selection).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(t.text)
+                        .bg(t.selection)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     s_dim
                 };
@@ -1678,7 +1798,10 @@ fn draw(f: &mut Frame, app: &mut App) {
                 let is_selected = i == popup.selected;
                 let prefix = if is_selected { " > " } else { "   " };
                 let style = if is_selected {
-                    Style::default().fg(t.text).bg(t.selection).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(t.text)
+                        .bg(t.selection)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     s_dim
                 };
@@ -1687,7 +1810,10 @@ fn draw(f: &mut Frame, app: &mut App) {
             .collect();
         f.render_widget(Paragraph::new(lines), popup_chunks[0]);
 
-        let hint = Line::from(Span::styled(" j/k preview  enter select  esc cancel", s_muted));
+        let hint = Line::from(Span::styled(
+            " j/k preview  enter select  esc cancel",
+            s_muted,
+        ));
         f.render_widget(Paragraph::new(hint), popup_chunks[1]);
     }
 
@@ -2018,7 +2144,10 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect, s: &S
             text_area,
         );
     } else {
-        f.render_widget(Paragraph::new(Span::styled("No selection", s_muted)), text_area);
+        f.render_widget(
+            Paragraph::new(Span::styled("No selection", s_muted)),
+            text_area,
+        );
     }
 }
 
@@ -2125,7 +2254,11 @@ struct DedupEntry {
 
 impl DedupEntry {
     fn from_path(path: &Path) -> Self {
-        let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let dir_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let bookmark = metadata::read_info(path).unwrap_or_else(|_| Bookmark {
             url: String::new(),
             title: "Unknown".to_string(),
@@ -2150,14 +2283,30 @@ impl DedupEntry {
 
 fn metadata_score(b: &Bookmark) -> u32 {
     let mut score = 0u32;
-    if !b.title.is_empty() { score += 1; }
-    if !b.url.is_empty() { score += 1; }
-    if b.description.is_some() { score += 1; }
-    if !b.authors.is_empty() { score += 1; }
-    if b.site.is_some() { score += 1; }
-    if b.year.is_some() { score += 1; }
-    if !b.tags.is_empty() { score += 1; }
-    if b.added.is_some() { score += 1; }
+    if !b.title.is_empty() {
+        score += 1;
+    }
+    if !b.url.is_empty() {
+        score += 1;
+    }
+    if b.description.is_some() {
+        score += 1;
+    }
+    if !b.authors.is_empty() {
+        score += 1;
+    }
+    if b.site.is_some() {
+        score += 1;
+    }
+    if b.year.is_some() {
+        score += 1;
+    }
+    if !b.tags.is_empty() {
+        score += 1;
+    }
+    if b.added.is_some() {
+        score += 1;
+    }
     score
 }
 
@@ -2181,7 +2330,10 @@ fn find_duplicate_groups(library: &Path) -> Result<Vec<Vec<PathBuf>>> {
 
         let normalized_title = b.title.trim().to_lowercase();
         if !normalized_title.is_empty() {
-            by_title.entry(normalized_title).or_default().push(dir.clone());
+            by_title
+                .entry(normalized_title)
+                .or_default()
+                .push(dir.clone());
         }
     }
 
@@ -2190,7 +2342,11 @@ fn find_duplicate_groups(library: &Path) -> Result<Vec<Vec<PathBuf>>> {
 
     for paths in by_url.values() {
         if paths.len() > 1 {
-            let group: Vec<_> = paths.iter().filter(|p| !seen.contains(*p)).cloned().collect();
+            let group: Vec<_> = paths
+                .iter()
+                .filter(|p| !seen.contains(*p))
+                .cloned()
+                .collect();
             if group.len() > 1 {
                 for p in &group {
                     seen.insert(p.clone());
@@ -2202,7 +2358,11 @@ fn find_duplicate_groups(library: &Path) -> Result<Vec<Vec<PathBuf>>> {
 
     for paths in by_title.values() {
         if paths.len() > 1 {
-            let group: Vec<_> = paths.iter().filter(|p| !seen.contains(*p)).cloned().collect();
+            let group: Vec<_> = paths
+                .iter()
+                .filter(|p| !seen.contains(*p))
+                .cloned()
+                .collect();
             if group.len() > 1 {
                 for p in &group {
                     seen.insert(p.clone());
@@ -2218,7 +2378,10 @@ fn find_duplicate_groups(library: &Path) -> Result<Vec<Vec<PathBuf>>> {
 fn canonicalize_url(url: &str) -> String {
     let s = url.trim().to_lowercase();
     let s = s.trim_end_matches('/');
-    let s = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let s = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+        .unwrap_or(s);
     let s = s.strip_prefix("www.").unwrap_or(s);
     s.to_string()
 }
@@ -2241,8 +2404,8 @@ fn draw_dedup(
 
     let area = f.area();
 
-    let chunks = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    let chunks =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
 
     let left = Layout::vertical([
         Constraint::Length(2),
@@ -2333,7 +2496,11 @@ fn draw_dedup(
 
     f.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::LEFT).border_style(s_muted))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(s_muted),
+            )
             .wrap(Wrap { trim: false }),
         chunks[1],
     );
