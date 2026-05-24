@@ -1994,6 +1994,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             ("c", "Clear search and tag filter"),
             ("t", "Browse tags"),
             ("T", "Switch theme"),
+            ("?", "Show this help"),
             ("q / esc", "Quit"),
             ("", ""),
             ("", "Search mode"),
@@ -2001,8 +2002,9 @@ fn draw(f: &mut Frame, app: &mut App) {
             ("^p / ^n", "Move up / down"),
             ("^d / ^u", "Half-page down / up"),
             ("^f / ^b", "Page down / up"),
+            ("^t", "Browse tags"),
+            ("tab / ^a", "Load filter into Add bar"),
             ("enter", "Confirm search"),
-            ("tab", "Browse tags"),
         ];
 
         let height = help_lines.len() as u16 + 4;
