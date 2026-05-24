@@ -77,25 +77,12 @@ pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
     ensure_library_gitignore(library);
 
     let fetched = fetch::fetch_url(input)?;
-    let mut bookmark = fetched.bookmark;
+    let bookmark = fetched.bookmark;
 
     let dir = storage::create_bookmark_dir(library, &bookmark)?;
 
     if let Some(text) = fetch::extract_article(&fetched.html, &bookmark.url) {
         let _ = std::fs::write(dir.join("article.txt"), text);
-    }
-
-    if let Some(ref img_url) = fetched.image_url {
-        match fetch::download_preview(img_url) {
-            Ok((bytes, ext)) => {
-                let filename = format!("preview.{}", ext);
-                let preview_path = dir.join(&filename);
-                if std::fs::write(&preview_path, &bytes).is_ok() {
-                    bookmark.preview = Some(filename);
-                }
-            }
-            Err(e) => eprintln!("warning: preview image fetch failed: {}", e),
-        }
     }
 
     metadata::write_info(&dir, &bookmark)?;

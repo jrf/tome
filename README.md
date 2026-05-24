@@ -3,9 +3,9 @@
 A fast TUI bookmark manager for web URLs.
 
 The filesystem is the source of truth — each bookmark is a directory containing
-an `info.toml` metadata file (and optionally a saved HTML snapshot). SQLite
-(with FTS5) serves as a disposable search index, fully rebuildable from the
-filesystem at any time via `tome reindex`.
+an `info.toml` metadata file (and an optional `article.txt` of readability-extracted
+text). SQLite (with FTS5) serves as a disposable search index, fully rebuildable
+from the filesystem at any time via `tome reindex`.
 
 ## Install
 
@@ -66,7 +66,6 @@ tome rm <slug> --yes                  # skip confirmation
   example-com-attention/
     info.toml
     article.txt          # readability-extracted text (optional)
-    preview.jpg          # og:image (optional)
   arxiv-org-1706-03762/
     info.toml
 ```

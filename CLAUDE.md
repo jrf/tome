@@ -44,7 +44,6 @@ Architecturally, tome closely mirrors [grimoire](../grimoire) — a paper refere
   example-com-attention/
     info.toml                      # source of truth — human-editable metadata
     article.txt                    # readability-extracted text (optional)
-    preview.jpg                    # og:image (optional)
 ```
 
 Directory naming: `{site-slug}-{title-slug}`, with `-2` suffix on collision.

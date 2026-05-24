@@ -17,6 +17,7 @@
 ## Scrapped
 
 - HTML snapshot archive (`snapshot.html.gz` on add) — the gzipped page was never displayed in tome (no in-TUI HTML renderer, and `article.txt` covers the reading case), so the disk cost wasn't earning its keep.
+- Image previews (og:image download + in-TUI rendering via viuer) — disabled-by-default then dropped entirely. Kept two non-trivial deps (`viuer`, `image`) and a fragile terminal-graphics path alive for a feature that wasn't load-bearing. If revisited, design it fresh as a lazy on-demand fetch gated on terminal capability.
 
 ## Done
 

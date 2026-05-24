@@ -84,9 +84,6 @@ pub struct App {
     enrich_rx: Option<mpsc::Receiver<Vec<EnrichItem>>>,
     sort_mode: SortMode,
     validate_popup: Option<ValidatePopup>,
-    preview_image_path: Option<std::path::PathBuf>,
-    preview_image_area: Option<ratatui::layout::Rect>,
-    last_blit_key: Option<(std::path::PathBuf, ratatui::layout::Rect)>,
     reader_view: Option<ReaderView>,
     delete_confirm: Option<DeleteConfirm>,
 }
@@ -344,7 +341,6 @@ type Term = Terminal<CrosstermBackend<BufWriter<File>>>;
 fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Result<()> {
     loop {
         terminal.draw(|f| draw(f, app))?;
-        blit_preview_image(app, tty_ctl);
 
         if app.should_quit {
             return Ok(());
@@ -787,9 +783,6 @@ impl App {
             enrich_rx: None,
             sort_mode: SortMode::Added,
             validate_popup: None,
-            preview_image_path: None,
-            preview_image_area: None,
-            last_blit_key: None,
             reader_view: None,
             delete_confirm: None,
         };
@@ -1426,7 +1419,7 @@ fn needs_enrich(b: &Bookmark) -> bool {
         || b.year.is_none()
 }
 
-fn enrich_bookmark(b: &Bookmark, dir: &Path) -> Result<Option<Bookmark>> {
+fn enrich_bookmark(b: &Bookmark, _dir: &Path) -> Result<Option<Bookmark>> {
     use crate::fetch;
 
     if b.url.is_empty() {
@@ -1457,55 +1450,7 @@ fn enrich_bookmark(b: &Bookmark, dir: &Path) -> Result<Option<Bookmark>> {
         updated.year = fetched_bookmark.year;
     }
 
-    if updated.preview.is_none()
-        && let Some(ref img_url) = fetched.image_url
-        && let Ok((bytes, ext)) = fetch::download_preview(img_url)
-    {
-        let filename = format!("preview.{}", ext);
-        if std::fs::write(dir.join(&filename), &bytes).is_ok() {
-            updated.preview = Some(filename);
-        }
-    }
-
     Ok(Some(updated))
-}
-
-fn blit_preview_image(app: &mut App, tty_ctl: &mut File) {
-    use std::io::Write;
-    let suppress = app.reader_view.is_some();
-    let key = if suppress {
-        None
-    } else {
-        app.preview_image_path
-            .as_ref()
-            .zip(app.preview_image_area)
-            .map(|(p, r)| (p.clone(), r))
-    };
-
-    if key == app.last_blit_key {
-        return;
-    }
-
-    if app.last_blit_key.is_some() && key.is_none() {
-        let _ = tty_ctl.write_all(b"\x1b_Ga=d,d=A\x1b\\");
-        let _ = tty_ctl.flush();
-    }
-
-    if let Some((ref path, rect)) = key {
-        let cfg = viuer::Config {
-            x: rect.x,
-            y: rect.y as i16,
-            width: Some(rect.width as u32),
-            height: Some(rect.height as u32),
-            absolute_offset: true,
-            transparent: true,
-            restore_cursor: true,
-            ..Default::default()
-        };
-        let _ = viuer::print_from_file(path, &cfg);
-    }
-
-    app.last_blit_key = key;
 }
 
 fn pipe_to_pbcopy(s: &str) -> std::io::Result<()> {
@@ -1756,9 +1701,6 @@ fn draw(f: &mut Frame, app: &mut App) {
             date: s_date,
         };
         draw_preview(f, app, content_area, &styles);
-    } else {
-        app.preview_image_path = None;
-        app.preview_image_area = None;
     }
 
     if let Some(ref mut popup) = app.tag_popup {
@@ -2156,40 +2098,7 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect, s: &S
     let s_link = s.link;
     let s_date = s.date;
 
-    app.preview_image_path = None;
-    app.preview_image_area = None;
-
-    let text_area = if app.config.images_enabled() && area.height >= 14 {
-        if let Some(entry) = app.selected_entry()
-            && let Some(ref preview) = entry.bookmark.preview
-        {
-            let path = entry.dir.join(preview);
-            if path.exists() {
-                let img_height = (area.height * 4 / 10).clamp(8, 16);
-                let img_area = ratatui::layout::Rect {
-                    x: area.x,
-                    y: area.y,
-                    width: area.width,
-                    height: img_height,
-                };
-                let text_area = ratatui::layout::Rect {
-                    x: area.x,
-                    y: area.y + img_height,
-                    width: area.width,
-                    height: area.height - img_height,
-                };
-                app.preview_image_path = Some(path);
-                app.preview_image_area = Some(img_area);
-                text_area
-            } else {
-                area
-            }
-        } else {
-            area
-        }
-    } else {
-        area
-    };
+    let text_area = area;
 
     if let Some(entry) = app.selected_entry() {
         let b = &entry.bookmark;
@@ -2377,7 +2286,6 @@ impl DedupEntry {
             tags: vec![],
             added: None,
             files: vec![],
-            preview: None,
         });
         let score = metadata_score(&bookmark);
         Self {

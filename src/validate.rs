@@ -73,13 +73,6 @@ pub fn validate(library: &Path, fix: bool) -> Result<ValidateResult> {
                 issues.push(format!("listed but missing: {}/{}", dir_name, listed));
             }
         }
-
-        if let Some(ref preview) = bookmark.preview {
-            let p = dir.join(preview);
-            if !p.exists() {
-                issues.push(format!("preview missing: {}/{}", dir_name, preview));
-            }
-        }
     }
 
     Ok(ValidateResult {

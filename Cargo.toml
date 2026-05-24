@@ -10,7 +10,6 @@ clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.28", features = ["use-dev-tty"] }
 dirs = "6"
 dom_smoothie = "0.10"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 nucleo-matcher = "0.3"
 ratatui = "0.30"
 regex = "1"
@@ -22,4 +21,3 @@ shellexpand = "3"
 slug = "0.1"
 toml = "0.8"
 url = "2"
-viuer = { version = "0.9", features = ["print-file"] }

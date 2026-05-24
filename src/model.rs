@@ -14,6 +14,4 @@ pub struct Bookmark {
     pub added: Option<String>,
     #[serde(default)]
     pub files: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
 }

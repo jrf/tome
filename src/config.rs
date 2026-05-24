@@ -10,7 +10,6 @@ pub struct Config {
     pub browser: Option<String>,
     pub theme: Option<String>,
     pub layout: Option<String>,
-    pub images: Option<bool>,
 }
 
 impl Config {
@@ -26,13 +25,8 @@ impl Config {
                 browser: None,
                 theme: None,
                 layout: None,
-                images: None,
             })
         }
-    }
-
-    pub fn images_enabled(&self) -> bool {
-        self.images.unwrap_or(false)
     }
 
     pub fn library_dir(&self) -> PathBuf {
