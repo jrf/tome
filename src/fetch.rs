@@ -8,7 +8,7 @@ use crate::metadata;
 use crate::model::Bookmark;
 
 const USER_AGENT: &str =
-    "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrfetzer/tome)";
+    "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrf/tome)";
 
 const MAX_IMAGE_BYTES: u64 = 4 * 1024 * 1024;
 const PREVIEW_MAX_WIDTH: u32 = 800;
