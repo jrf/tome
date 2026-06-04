@@ -224,10 +224,7 @@ struct ThemePopup {
 impl ThemePopup {
     fn new() -> Self {
         let mut names = Vec::new();
-        let theme_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("tome")
-            .join("themes");
+        let theme_dir = crate::config::config_dir().join("themes");
         if let Ok(entries) = std::fs::read_dir(&theme_dir) {
             names = entries
                 .flatten()

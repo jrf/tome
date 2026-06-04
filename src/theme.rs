@@ -115,10 +115,7 @@ pub fn load_theme(config_theme: Option<&str>) -> Theme {
     let name = config_theme.unwrap_or("tokyo-night-moon");
     let base = default_theme();
 
-    let theme_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("tome")
-        .join("themes");
+    let theme_dir = crate::config::config_dir().join("themes");
 
     let theme_file = theme_dir.join(format!("{}.toml", name));
     if let Ok(contents) = std::fs::read_to_string(&theme_file)
