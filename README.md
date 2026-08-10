@@ -1,11 +1,11 @@
-# tome
+# cairn
 
 A fast TUI bookmark manager for web URLs.
 
 The filesystem is the source of truth — each bookmark is a directory containing
 an `info.toml` metadata file (and an optional `article.txt` of readability-extracted
 text). SQLite (with FTS5) serves as a disposable search index, fully rebuildable
-from the filesystem at any time via `tome reindex`.
+from the filesystem at any time via `cairn reindex`.
 
 ## Install
 
@@ -24,14 +24,14 @@ just install
 ## Usage
 
 ```
-tome                                  # browse library
-tome rust                             # browse with "rust" pre-filled
-tome add https://example.com/article  # fetch metadata, add bookmark
-tome reindex                          # rebuild search index from filesystem
-tome validate                         # check library integrity
-tome validate --fix                   # auto-fix issues
-tome rm <slug>                        # delete bookmark by directory slug
-tome rm <slug> --yes                  # skip confirmation
+cairn                                  # browse library
+cairn rust                             # browse with "rust" pre-filled
+cairn add https://example.com/article  # fetch metadata, add bookmark
+cairn reindex                          # rebuild search index from filesystem
+cairn validate                         # check library integrity
+cairn validate --fix                   # auto-fix issues
+cairn rm <slug>                        # delete bookmark by directory slug
+cairn rm <slug> --yes                  # skip confirmation
 ```
 
 ### TUI keybindings
@@ -88,15 +88,15 @@ files = []  # optional snapshot files
 
 ## Configuration
 
-Optional. tome works without any config file.
+Optional. cairn works without any config file.
 
-`~/.config/tome/config.toml`:
+`~/.config/cairn/config.toml`:
 
 ```toml
 library = "~/Bookmarks"     # default
 editor = "hx"               # defaults to $EDITOR
-browser = "open"            # defaults to $TOME_BROWSER or "open"
+browser = "open"            # defaults to $CAIRN_BROWSER or "open"
 theme = "tokyo-night-moon"  # default
 ```
 
-Environment variables: `$TOME_LIBRARY`, `$TOME_BROWSER`, `$EDITOR`.
+Environment variables: `$CAIRN_LIBRARY`, `$CAIRN_BROWSER`, `$EDITOR`.

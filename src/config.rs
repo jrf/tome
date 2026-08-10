@@ -30,7 +30,7 @@ impl Config {
     }
 
     pub fn library_dir(&self) -> PathBuf {
-        if let Ok(val) = std::env::var("TOME_LIBRARY") {
+        if let Ok(val) = std::env::var("CAIRN_LIBRARY") {
             return PathBuf::from(val);
         }
         if let Some(ref lib) = self.library {
@@ -50,7 +50,7 @@ impl Config {
     }
 
     pub fn browser(&self) -> String {
-        std::env::var("TOME_BROWSER")
+        std::env::var("CAIRN_BROWSER")
             .ok()
             .or_else(|| self.browser.clone())
             .unwrap_or_else(|| "open".to_string())
@@ -77,13 +77,13 @@ pub fn config_dir() -> PathBuf {
 fn config_dir_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
-        out.push(PathBuf::from(val).join("tome"));
+        out.push(PathBuf::from(val).join("cairn"));
     }
     if let Some(home) = dirs::home_dir() {
-        out.push(home.join(".config").join("tome"));
+        out.push(home.join(".config").join("cairn"));
     }
     if let Some(native) = dirs::config_dir() {
-        let native = native.join("tome");
+        let native = native.join("cairn");
         if !out.contains(&native) {
             out.push(native);
         }

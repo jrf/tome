@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand};
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "tome", about = "A fast TUI bookmark manager")]
+#[command(name = "cairn", about = "A fast TUI bookmark manager")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -98,7 +98,7 @@ fn ensure_library_gitignore(library: &Path) {
     if path.exists() {
         return;
     }
-    let contents = ".tome.db\n.tome.db-wal\n.tome.db-shm\n.trash/\n";
+    let contents = ".cairn.db\n.cairn.db-wal\n.cairn.db-shm\n.trash/\n";
     let _ = std::fs::write(path, contents);
 }
 

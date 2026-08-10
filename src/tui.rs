@@ -1127,7 +1127,7 @@ impl App {
 
         self.flash = Some(("Adding...".to_string(), std::time::Instant::now()));
 
-        let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tome"));
+        let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cairn"));
         let output = std::process::Command::new(bin)
             .arg("add")
             .arg(&input)

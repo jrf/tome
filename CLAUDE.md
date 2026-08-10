@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-tome is a CLI/TUI bookmark manager for web URLs, written in Rust. The filesystem is the source of truth — each bookmark is a directory containing an `info.toml` metadata file. SQLite (with FTS5) serves as a disposable search index, fully rebuildable from the filesystem at any time via `tome reindex`.
+cairn is a CLI/TUI bookmark manager for web URLs, written in Rust. The filesystem is the source of truth — each bookmark is a directory containing an `info.toml` metadata file. SQLite (with FTS5) serves as a disposable search index, fully rebuildable from the filesystem at any time via `cairn reindex`.
 
-Architecturally, tome closely mirrors [grimoire](../grimoire) — a paper reference manager — but adapted for web URLs instead of PDFs.
+Architecturally, cairn closely mirrors [grimoire](../grimoire) — a paper reference manager — but adapted for web URLs instead of PDFs.
 
 ## Build commands
 
@@ -15,7 +15,7 @@ Architecturally, tome closely mirrors [grimoire](../grimoire) — a paper refere
 - `cargo run -- <args>` — run CLI with arguments
 - `cargo clippy` — lint
 - `cargo fmt --check` — check formatting
-- `just install` — release build + copy to `~/.local/bin/tome` + codesign on macOS
+- `just install` — release build + copy to `~/.local/bin/cairn` + codesign on macOS
 
 ## Architecture
 
@@ -28,19 +28,19 @@ Architecturally, tome closely mirrors [grimoire](../grimoire) — a paper refere
 - **metadata.rs** — Read/write `info.toml`.
 - **index.rs** — SQLite FTS5 index. Schema with triggers, ranked search.
 - **fetch.rs** — Fetch HTML, extract OpenGraph / meta-tag metadata (title, description, author, site, year).
-- **config.rs** — Load `~/.config/tome/config.toml`. Resolution order: env var > config file > default.
-- **theme.rs** — Color theme system. Loads from `~/.config/tome/themes/{name}.toml`, defaults to Tokyo Night Moon.
+- **config.rs** — Load `~/.config/cairn/config.toml`. Resolution order: env var > config file > default.
+- **theme.rs** — Color theme system. Loads from `~/.config/cairn/themes/{name}.toml`, defaults to Tokyo Night Moon.
 - **validate.rs** — Library integrity checks with optional auto-fix.
 
 ### Core design principles
 
-- **Filesystem is truth.** SQLite is disposable. `tome reindex` rebuilds from scratch.
+- **Filesystem is truth.** SQLite is disposable. `cairn reindex` rebuilds from scratch.
 - **Defaults over config.** Library at `~/Bookmarks`, `$EDITOR` for editing, `open` for URLs. Config is optional.
 
 ### Filesystem layout (library)
 
 ```
-~/Bookmarks/                       # configurable via $TOME_LIBRARY or config
+~/Bookmarks/                       # configurable via $CAIRN_LIBRARY or config
   example-com-attention/
     info.toml                      # source of truth — human-editable metadata
     article.txt                    # readability-extracted text (optional)

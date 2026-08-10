@@ -6,7 +6,7 @@ use url::Url;
 use crate::metadata;
 use crate::model::Bookmark;
 
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; tome/0.1; +https://github.com/jrf/tome)";
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; cairn/0.1; +https://github.com/jrf/cairn)";
 
 pub struct FetchResult {
     pub bookmark: Bookmark,
