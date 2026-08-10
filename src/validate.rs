@@ -94,3 +94,40 @@ pub fn run(library: &Path, fix: bool) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::model::Bookmark;
+
+    #[test]
+    fn validation_is_read_only_without_fix() {
+        let temp = tempdir().unwrap();
+        let dir = temp.path().join("synthetic-bookmark");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bookmark = Bookmark {
+            url: "https://example.com/synthetic".to_string(),
+            title: "Synthetic bookmark".to_string(),
+            description: None,
+            authors: vec![],
+            site: Some("example.com".to_string()),
+            year: None,
+            tags: vec![],
+            added: None,
+            files: vec![],
+        };
+        metadata::write_info(&dir, &bookmark).unwrap();
+
+        let result = validate(temp.path(), false).unwrap();
+        assert_eq!(result.fixed, 0);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.contains("missing added"))
+        );
+        assert!(metadata::read_info(&dir).unwrap().added.is_none());
+    }
+}

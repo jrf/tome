@@ -9,6 +9,7 @@ pub struct Config {
     pub editor: Option<String>,
     pub browser: Option<String>,
     pub theme: Option<String>,
+    pub theme_catalog: Option<String>,
     pub layout: Option<String>,
 }
 
@@ -24,6 +25,7 @@ impl Config {
                 editor: None,
                 browser: None,
                 theme: None,
+                theme_catalog: None,
                 layout: None,
             })
         }

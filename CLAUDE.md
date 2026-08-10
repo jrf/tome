@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-cairn is a CLI/TUI bookmark manager for web URLs, written in Rust. The filesystem is the source of truth — each bookmark is a directory containing an `info.toml` metadata file. SQLite (with FTS5) serves as a disposable search index, fully rebuildable from the filesystem at any time via `cairn reindex`.
+cairn is a CLI/TUI bookmark manager for web URLs, written in Rust. The filesystem is the source of truth — each bookmark is a directory containing an `info.toml` metadata file. SQLite (with FTS5) serves as a disposable full-text search index, reconciled at TUI startup and rebuildable via `cairn reindex`.
 
 Architecturally, cairn closely mirrors [grimoire](../grimoire) — a paper reference manager — but adapted for web URLs instead of PDFs.
 
@@ -21,20 +21,23 @@ Architecturally, cairn closely mirrors [grimoire](../grimoire) — a paper refer
 
 ### Module overview
 
-- **main.rs** — CLI entry point (clap). Bare invocation opens the TUI; subcommands `add`, `reindex`, `validate`, `rm`.
+- **main.rs** — CLI entry point (clap). Bare invocation opens the TUI; subcommands `add`, `reindex`, `validate`, `rm`, `restore`.
+- **capture.rs** — Durable save-before-fetch workflow and metadata/article enrichment.
 - **model.rs** — `Bookmark` struct. The core data type used by every other module.
-- **tui.rs** — Interactive TUI (ratatui). Browse/Search modes, fuzzy filtering, tag/theme popups, dedup workflow, preview pane.
+- **tui.rs** — Interactive TUI (ratatui). Browse/Search modes, combined FTS/fuzzy filtering, tag/theme popups, dedup workflow, preview pane.
 - **storage.rs** — Filesystem operations: create bookmark directories (`{site}-{title}`), list bookmark dirs.
 - **metadata.rs** — Read/write `info.toml`.
-- **index.rs** — SQLite FTS5 index. Schema with triggers, ranked search.
+- **index.rs** — Disposable SQLite FTS5 index over metadata and article text. Schema with triggers, ranked search, startup reconciliation.
 - **fetch.rs** — Fetch HTML, extract OpenGraph / meta-tag metadata (title, description, author, site, year).
+- **urls.rs** — HTTP(S) validation and canonical keys for duplicate detection.
 - **config.rs** — Load `~/.config/cairn/config.toml`. Resolution order: env var > config file > default.
-- **theme.rs** — Color theme system. Loads from `~/.config/cairn/themes/{name}.toml`, defaults to Tokyo Night Moon.
-- **validate.rs** — Library integrity checks with optional auto-fix.
+- **theme.rs** — Grimoire-compatible semantic theme system. Loads a configured theme path directly, uses an explicit theme catalog for the session-only picker, and falls back to terminal colors.
+- **validate.rs** — Read-only library integrity checks with an explicit CLI auto-fix option.
 
 ### Core design principles
 
-- **Filesystem is truth.** SQLite is disposable. `cairn reindex` rebuilds from scratch.
+- **Filesystem is truth.** SQLite is disposable. TUI startup reconciles it, and `cairn reindex` rebuilds it on demand.
+- **Capture before enrichment.** A valid URL is written before network metadata fetching, so an offline or blocked fetch does not lose the bookmark.
 - **Defaults over config.** Library at `~/Bookmarks`, `$EDITOR` for editing, `open` for URLs. Config is optional.
 
 ### Filesystem layout (library)

@@ -12,7 +12,7 @@ use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
@@ -67,6 +67,7 @@ pub struct App {
     filter: String,
     list_state: ListState,
     config: AppConfig,
+    index: Option<index::Index>,
     theme: Theme,
     input_mode: InputMode,
     should_quit: bool,
@@ -80,12 +81,18 @@ pub struct App {
     show_help: bool,
     list_height: usize,
     add_input: Option<String>,
+    add_rx: Option<mpsc::Receiver<AddOutcome>>,
     enrich_preview: Option<EnrichPreview>,
     enrich_rx: Option<mpsc::Receiver<Vec<EnrichItem>>>,
     sort_mode: SortMode,
     validate_popup: Option<ValidatePopup>,
     reader_view: Option<ReaderView>,
     delete_confirm: Option<DeleteConfirm>,
+}
+
+struct AddOutcome {
+    dir_name: String,
+    result: std::result::Result<String, String>,
 }
 
 struct DeleteConfirm {
@@ -218,24 +225,18 @@ impl TagPopup {
 
 struct ThemePopup {
     names: Vec<String>,
+    paths: Vec<String>,
     selected: usize,
 }
 
 impl ThemePopup {
-    fn new() -> Self {
-        let mut names = Vec::new();
-        let theme_dir = crate::config::config_dir().join("themes");
-        if let Ok(entries) = std::fs::read_dir(&theme_dir) {
-            names = entries
-                .flatten()
-                .filter_map(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.strip_suffix(".toml").map(|s| s.to_string())
-                })
-                .collect();
-            names.sort();
+    fn new(catalog_path: Option<&str>) -> Self {
+        let (names, paths) = theme::catalog_entries(catalog_path).into_iter().unzip();
+        Self {
+            names,
+            paths,
+            selected: 0,
         }
-        Self { names, selected: 0 }
     }
 
     fn move_up(&mut self) {
@@ -248,8 +249,8 @@ impl ThemePopup {
         }
     }
 
-    fn selected_name(&self) -> Option<&str> {
-        self.names.get(self.selected).map(|s| s.as_str())
+    fn selected_path(&self) -> Option<&str> {
+        self.paths.get(self.selected).map(String::as_str)
     }
 }
 
@@ -343,6 +344,30 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
             return Ok(());
         }
 
+        if let Some(ref rx) = app.add_rx {
+            match rx.try_recv() {
+                Ok(outcome) => {
+                    app.add_rx = None;
+                    app.reload_entries();
+                    app.jump_to_dir_name(&outcome.dir_name);
+                    let message = match outcome.result {
+                        Ok(title) => format!("Added: {}", title),
+                        Err(error) => format!("Saved; metadata fetch failed: {}", error),
+                    };
+                    app.flash = Some((message, std::time::Instant::now()));
+                    continue;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    app.add_rx = None;
+                    app.flash = Some((
+                        "Saved; metadata worker stopped".to_string(),
+                        std::time::Instant::now(),
+                    ));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
         if let Some(ref rx) = app.enrich_rx {
             match rx.try_recv() {
                 Ok(items) => {
@@ -374,13 +399,18 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
             }
         }
 
-        let timeout = if app.flash.is_some() || app.enrich_rx.is_some() {
+        let timeout = if app.flash.is_some() || app.add_rx.is_some() || app.enrich_rx.is_some() {
             std::time::Duration::from_millis(100)
         } else {
             std::time::Duration::from_secs(60)
         };
         if !event::poll(timeout)? {
-            if app.enrich_rx.is_some() {
+            if app.add_rx.is_some() {
+                app.flash = Some((
+                    "Saved; fetching metadata...".to_string(),
+                    std::time::Instant::now(),
+                ));
+            } else if app.enrich_rx.is_some() {
                 app.flash = Some(("Fetching...".to_string(), std::time::Instant::now()));
             } else if app.flash_message().is_none() {
                 app.flash = None;
@@ -581,16 +611,14 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         app.theme_popup.as_mut().unwrap().move_up();
-                        if let Some(name) = app.theme_popup.as_ref().unwrap().selected_name() {
-                            let theme_name = if name == "default" { None } else { Some(name) };
-                            app.theme = theme::load_theme(theme_name);
+                        if let Some(path) = app.theme_popup.as_ref().unwrap().selected_path() {
+                            app.theme = theme::load_theme(Some(path));
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         app.theme_popup.as_mut().unwrap().move_down();
-                        if let Some(name) = app.theme_popup.as_ref().unwrap().selected_name() {
-                            let theme_name = if name == "default" { None } else { Some(name) };
-                            app.theme = theme::load_theme(theme_name);
+                        if let Some(path) = app.theme_popup.as_ref().unwrap().selected_path() {
+                            app.theme = theme::load_theme(Some(path));
                         }
                     }
                     KeyCode::Enter => {
@@ -674,7 +702,8 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                             Some(TagPopup::new(&app.all_tags, &app.entries, &app.tag_filter));
                     }
                     (KeyCode::Char('T'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                        app.theme_popup = Some(ThemePopup::new());
+                        app.theme_popup =
+                            Some(ThemePopup::new(app.config.theme_catalog.as_deref()));
                     }
                     (KeyCode::Char('c'), KeyModifiers::NONE) => {
                         app.filter.clear();
@@ -694,7 +723,14 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                         app.action_copy_markdown();
                     }
                     (KeyCode::Char('a'), KeyModifiers::NONE) => {
-                        app.add_input = Some(String::new());
+                        if app.add_rx.is_none() {
+                            app.add_input = Some(String::new());
+                        } else {
+                            app.flash = Some((
+                                "A bookmark is still being enriched".to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        }
                     }
                     (KeyCode::Char('r'), KeyModifiers::NONE) => {
                         app.action_enrich_selected();
@@ -714,11 +750,9 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
                     (KeyCode::Char('V'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
                         app.action_validate();
                     }
-                    (KeyCode::Char('s'), KeyModifiers::NONE) => {
-                        if app.filter.is_empty() {
-                            app.sort_mode = app.sort_mode.next();
-                            app.rebuild_filter();
-                        }
+                    (KeyCode::Char('s'), KeyModifiers::NONE) if app.filter.is_empty() => {
+                        app.sort_mode = app.sort_mode.next();
+                        app.rebuild_filter();
                     }
                     (KeyCode::Char('J'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
                         app.preview_scroll = app.preview_scroll.saturating_add(3);
@@ -742,7 +776,26 @@ fn run_event_loop(terminal: &mut Term, app: &mut App, tty_ctl: &mut File) -> Res
 impl App {
     fn new(config: &AppConfig, library: &Path, initial_query: Option<&str>) -> Result<Self> {
         let dirs = storage::list_bookmark_dirs(library)?;
+        let total_dirs = dirs.len();
         let entries: Vec<Entry> = dirs.into_iter().filter_map(make_entry).collect();
+        let invalid_entries = total_dirs.saturating_sub(entries.len());
+
+        let mut startup_warnings = Vec::new();
+        if invalid_entries > 0 {
+            startup_warnings.push(format!("{} unreadable bookmarks", invalid_entries));
+        }
+        let index = match index::Index::open(library) {
+            Ok(index) => {
+                if let Err(error) = index.reindex(library) {
+                    startup_warnings.push(format!("Index sync failed: {}", error));
+                }
+                Some(index)
+            }
+            Err(error) => {
+                startup_warnings.push(format!("Index unavailable: {}", error));
+                None
+            }
+        };
 
         let filter = initial_query.unwrap_or("").to_string();
         let filtered_indices: Vec<usize> = (0..entries.len()).collect();
@@ -763,6 +816,7 @@ impl App {
             filter,
             list_state: ListState::default(),
             config: config.clone(),
+            index,
             theme,
             input_mode: InputMode::Browse,
             should_quit: false,
@@ -771,11 +825,13 @@ impl App {
             tag_popup: None,
             theme_popup: None,
             layout: LayoutMode::from_config(config.layout.as_deref()),
-            flash: None,
+            flash: (!startup_warnings.is_empty())
+                .then(|| (startup_warnings.join("; "), std::time::Instant::now())),
             preview_scroll: 0,
             show_help: false,
             list_height: 20,
             add_input: None,
+            add_rx: None,
             enrich_preview: None,
             enrich_rx: None,
             sort_mode: SortMode::Added,
@@ -808,6 +864,26 @@ impl App {
             self.filtered_indices = tag_filtered;
             self.apply_sort();
         } else {
+            let allowed: std::collections::HashSet<usize> = tag_filtered.iter().copied().collect();
+            let mut ordered: Vec<usize> = Vec::new();
+            let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
+            if let Some(index) = &self.index
+                && let Ok(dir_names) = index.search(&self.filter)
+            {
+                for dir_name in dir_names {
+                    if let Some(idx) = self
+                        .entries
+                        .iter()
+                        .position(|entry| entry.dir_name == dir_name)
+                        && allowed.contains(&idx)
+                        && seen.insert(idx)
+                    {
+                        ordered.push(idx);
+                    }
+                }
+            }
+
             let pattern = Pattern::parse(&self.filter, CaseMatching::Ignore, Normalization::Smart);
             let mut matcher = Matcher::new(Config::DEFAULT);
             let mut buf = Vec::new();
@@ -820,7 +896,12 @@ impl App {
                 })
                 .collect();
             scored.sort_by_key(|&(_, s)| std::cmp::Reverse(s));
-            self.filtered_indices = scored.into_iter().map(|(i, _)| i).collect();
+            for (idx, _) in scored {
+                if seen.insert(idx) {
+                    ordered.push(idx);
+                }
+            }
+            self.filtered_indices = ordered;
         }
 
         if self.filtered_indices.is_empty() {
@@ -1016,11 +1097,11 @@ impl App {
             None => return,
         };
         let dir = self.entries[confirm.idx].dir.clone();
-        match storage::delete_bookmark_dir(&dir) {
-            Ok(()) => {
-                let library = self.config.library_dir();
-                if let Ok(idx) = index::Index::open(&library) {
-                    let _ = idx.delete(&confirm.dir_name);
+        let library = self.config.library_dir();
+        match storage::trash_bookmark_dir(&library, &dir) {
+            Ok(_) => {
+                if let Some(index) = &self.index {
+                    let _ = index.delete(&confirm.dir_name);
                 }
                 self.reload_entries();
                 let visible = self.filtered_indices.len();
@@ -1031,7 +1112,7 @@ impl App {
                     self.list_state.select(Some(pos));
                 }
                 self.flash = Some((
-                    format!("Deleted: {}", confirm.title),
+                    format!("Moved to trash: {}", confirm.title),
                     std::time::Instant::now(),
                 ));
             }
@@ -1059,10 +1140,9 @@ impl App {
         terminal::enable_raw_mode()?;
         terminal.clear()?;
 
-        let idx = self.filtered_indices[self.list_state.selected().unwrap_or(0)];
-        if let Ok(b) = metadata::read_info(&self.entries[idx].dir) {
-            self.update_entry_display(idx, b);
-        }
+        let dir_name = entry.dir_name.clone();
+        self.reload_entries();
+        self.jump_to_dir_name(&dir_name);
         Ok(())
     }
 
@@ -1117,6 +1197,13 @@ impl App {
     }
 
     fn submit_add(&mut self) {
+        if self.add_rx.is_some() {
+            self.flash = Some((
+                "A bookmark is still being enriched".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
         let input = match self.add_input.take() {
             Some(s) if !s.trim().is_empty() => s.trim().to_string(),
             _ => {
@@ -1125,57 +1212,81 @@ impl App {
             }
         };
 
-        self.flash = Some(("Adding...".to_string(), std::time::Instant::now()));
-
-        let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cairn"));
-        let output = std::process::Command::new(bin)
-            .arg("add")
-            .arg(&input)
-            .output();
-
-        match output {
-            Ok(o) if o.status.success() => {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                let msg = stdout
-                    .lines()
-                    .find(|l| l.starts_with("Added:"))
-                    .unwrap_or("Added successfully")
-                    .to_string();
-                self.flash = Some((msg, std::time::Instant::now()));
+        let library = self.config.library_dir();
+        match crate::capture::capture_url(&library, &input) {
+            Ok(crate::capture::CaptureResult::Existing { dir, bookmark }) => {
+                self.filter.clear();
+                self.tag_filter = None;
                 self.reload_entries();
+                if let Some(dir_name) = dir.file_name().and_then(|name| name.to_str()) {
+                    self.jump_to_dir_name(dir_name);
+                }
+                self.flash = Some((
+                    format!("Already saved: {}", bookmark.title),
+                    std::time::Instant::now(),
+                ));
             }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let msg = stderr.lines().last().unwrap_or("Add failed").to_string();
-                self.flash = Some((msg, std::time::Instant::now()));
+            Ok(crate::capture::CaptureResult::Created { dir, .. }) => {
+                let dir_name = dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                self.filter.clear();
+                self.tag_filter = None;
+                self.reload_entries();
+                self.jump_to_dir_name(&dir_name);
+                self.flash = Some((
+                    "Saved; fetching metadata...".to_string(),
+                    std::time::Instant::now(),
+                ));
+
+                let (tx, rx) = mpsc::channel();
+                self.add_rx = Some(rx);
+                std::thread::spawn(move || {
+                    let result = crate::capture::enrich_saved_bookmark(&library, &dir)
+                        .map(|bookmark| bookmark.title)
+                        .map_err(|error| error.to_string());
+                    let _ = tx.send(AddOutcome { dir_name, result });
+                });
             }
-            Err(e) => {
-                self.flash = Some((format!("Error: {}", e), std::time::Instant::now()));
+            Err(error) => {
+                self.flash = Some((format!("Add failed: {}", error), std::time::Instant::now()));
             }
         }
     }
 
     fn action_reindex(&mut self) {
         let library = self.config.library_dir();
-        match index::Index::open(&library).and_then(|idx| idx.reindex(&library)) {
-            Ok(count) => {
-                self.reload_entries();
+        match index::Index::open(&library) {
+            Ok(index) => match index.reindex(&library) {
+                Ok(count) => {
+                    self.index = Some(index);
+                    self.flash = Some((
+                        format!("Reindexed {} bookmarks", count),
+                        std::time::Instant::now(),
+                    ));
+                }
+                Err(error) => {
+                    self.flash = Some((
+                        format!("Reindex error: {}", error),
+                        std::time::Instant::now(),
+                    ));
+                }
+            },
+            Err(error) => {
                 self.flash = Some((
-                    format!("Reindexed {} bookmarks", count),
+                    format!("Reindex error: {}", error),
                     std::time::Instant::now(),
                 ));
-            }
-            Err(e) => {
-                self.flash = Some((format!("Reindex error: {}", e), std::time::Instant::now()));
             }
         }
     }
 
     fn action_validate(&mut self) {
         let library = self.config.library_dir();
-        match validate::validate(&library, true) {
+        match validate::validate(&library, false) {
             Ok(result) => {
-                self.reload_entries();
                 self.validate_popup = Some(ValidatePopup {
                     summary: result.summary(),
                     issues: result.issues,
@@ -1190,6 +1301,17 @@ impl App {
 
     fn reload_entries(&mut self) {
         let library = self.config.library_dir();
+        if self.index.is_none() {
+            self.index = index::Index::open(&library).ok();
+        }
+        if let Some(index) = &self.index
+            && let Err(error) = index.reindex(&library)
+        {
+            self.flash = Some((
+                format!("Index sync failed: {}", error),
+                std::time::Instant::now(),
+            ));
+        }
         let dirs = match storage::list_bookmark_dirs(&library) {
             Ok(d) => d,
             Err(_) => return,
@@ -1342,6 +1464,16 @@ impl App {
         }
     }
 
+    fn jump_to_dir_name(&mut self, dir_name: &str) {
+        if let Some(entry_idx) = self
+            .entries
+            .iter()
+            .position(|entry| entry.dir_name == dir_name)
+        {
+            self.jump_to_entry(entry_idx);
+        }
+    }
+
     fn update_entry_display(&mut self, idx: usize, b: Bookmark) {
         let display = entry_display(&b);
         self.entries[idx].bookmark = b;
@@ -1470,8 +1602,27 @@ fn is_importable(input: &str) -> bool {
     trimmed.starts_with("http://") || trimmed.starts_with("https://")
 }
 
+fn picker_rect(area: Rect) -> Rect {
+    let width = if area.width > 4 {
+        (area.width * 3 / 4).max(50).min(area.width - 4)
+    } else {
+        area.width.max(1)
+    };
+    let height = if area.height > 4 {
+        (area.height * 3 / 4).max(6).min(area.height - 2)
+    } else {
+        area.height.max(1)
+    };
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
+}
+
 fn draw(f: &mut Frame, app: &mut App) {
-    let t = app.theme;
+    let t = &app.theme;
     let s_text = Style::default().fg(t.text);
     let s_dim = Style::default().fg(t.text_dim);
     let s_muted = Style::default().fg(t.text_muted);
@@ -1481,6 +1632,10 @@ fn draw(f: &mut Frame, app: &mut App) {
     let s_date = Style::default().fg(t.date);
 
     let area = f.area();
+    f.render_widget(
+        Block::default().style(Style::default().bg(t.background)),
+        area,
+    );
     let resolved = app.layout.resolve(area.width, area.height);
 
     let border_style = Style::default().fg(t.border);
@@ -1530,8 +1685,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(search_block, search_area);
     f.render_widget(Paragraph::new(search_content), search_inner);
 
-    if app.add_input.is_some() {
-        let add_text = app.add_input.as_ref().unwrap();
+    if let Some(add_text) = &app.add_input {
         let cursor_x = search_inner.x + add_text.len() as u16;
         f.set_cursor_position((cursor_x, search_inner.y));
     } else if app.input_mode == InputMode::Search {
@@ -1541,21 +1695,31 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
 
     let count_str = format!(" {}/{} ", app.filtered_indices.len(), app.entries.len());
-    let mode_indicator = match app.input_mode {
-        InputMode::Browse => Span::styled(
-            " BROWSE ",
+    let mode_indicator = if app.add_input.is_some() {
+        Span::styled(
+            " ADD ",
             Style::default()
                 .fg(t.status_fg)
-                .bg(t.normal_bg)
+                .bg(t.highlight)
                 .add_modifier(Modifier::BOLD),
-        ),
-        InputMode::Search => Span::styled(
-            " SEARCH ",
-            Style::default()
-                .fg(t.status_fg)
-                .bg(t.insert_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
+        )
+    } else {
+        match app.input_mode {
+            InputMode::Browse => Span::styled(
+                " BROWSE ",
+                Style::default()
+                    .fg(t.status_fg)
+                    .bg(t.normal_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            InputMode::Search => Span::styled(
+                " SEARCH ",
+                Style::default()
+                    .fg(t.status_fg)
+                    .bg(t.insert_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        }
     };
     let mode_hint = match app.input_mode {
         InputMode::Search => " esc browse ",
@@ -1781,12 +1945,7 @@ fn draw(f: &mut Frame, app: &mut App) {
 
     if let Some(ref popup) = app.theme_popup {
         let area = f.area();
-        let max_visible = 12.min(popup.names.len());
-        let height = max_visible as u16 + 3;
-        let width = 30.min(area.width.saturating_sub(4));
-        let x = area.width.saturating_sub(width) / 2;
-        let y = area.height.saturating_sub(height) / 2;
-        let popup_area = ratatui::layout::Rect::new(x, y, width, height);
+        let popup_area = picker_rect(area);
 
         f.render_widget(Clear, popup_area);
 
@@ -1802,7 +1961,8 @@ fn draw(f: &mut Frame, app: &mut App) {
         let popup_chunks =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
 
-        let scroll = popup.selected.saturating_sub(max_visible - 1);
+        let max_visible = usize::from(popup_chunks[0].height).max(1);
+        let scroll = popup.selected.saturating_sub(max_visible.saturating_sub(1));
 
         let lines: Vec<Line> = popup
             .names
@@ -1985,9 +2145,9 @@ fn draw(f: &mut Frame, app: &mut App) {
             ("R", "Refetch metadata for all w/ missing fields"),
             ("s", "Cycle sort (added/site/title/year)"),
             ("d", "Deduplicate library"),
-            ("D", "Delete selected bookmark"),
+            ("D", "Move selected bookmark to trash"),
             ("I", "Reindex library"),
-            ("V", "Validate library (auto-fix)"),
+            ("V", "Validate library (read-only)"),
             ("c", "Clear search and tag filter"),
             ("t", "Browse tags"),
             ("T", "Switch theme"),
@@ -2063,7 +2223,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             .borders(Borders::ALL)
             .style(Style::default().bg(t.popup_bg))
             .border_style(Style::default().fg(t.popup_border))
-            .title(" Delete bookmark? ")
+            .title(" Move bookmark to trash? ")
             .title_style(s_author.add_modifier(Modifier::BOLD));
         let inner = block.inner(popup_area);
         f.render_widget(block, popup_area);
@@ -2072,7 +2232,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             Line::from(""),
             Line::from(Span::styled(format!(" {}", title_line), s_text)),
             Line::from(""),
-            Line::from(Span::styled(" [y] delete   [n/esc] cancel", s_muted)),
+            Line::from(Span::styled(" [y] move   [n/esc] cancel", s_muted)),
         ];
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -2088,7 +2248,7 @@ struct Styles {
     date: Style,
 }
 
-fn draw_preview(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect, s: &Styles) {
+fn draw_preview(f: &mut Frame, app: &App, area: ratatui::layout::Rect, s: &Styles) {
     let s_text = s.text;
     let s_dim = s.dim;
     let s_muted = s.muted;
@@ -2194,7 +2354,6 @@ fn run_dedup(terminal: &mut Term, app: &mut App) -> Result<()> {
         return Ok(());
     }
 
-    let trash_dir = library.join(".trash");
     let mut removed = 0usize;
     let total_groups = groups.len();
 
@@ -2234,11 +2393,9 @@ fn run_dedup(terminal: &mut Term, app: &mut App) -> Result<()> {
                         selected = (selected + 1).min(entries.len() - 1);
                     }
                     (KeyCode::Enter, _) => {
-                        std::fs::create_dir_all(&trash_dir)?;
                         for (i, entry) in entries.iter().enumerate() {
                             if i != selected {
-                                let dest = trash_dir.join(&entry.dir_name);
-                                std::fs::rename(&entry.path, &dest)?;
+                                storage::trash_bookmark_dir(&library, &entry.path)?;
                                 removed += 1;
                             }
                         }
@@ -2251,7 +2408,7 @@ fn run_dedup(terminal: &mut Term, app: &mut App) -> Result<()> {
     }
 
     let msg = if removed > 0 {
-        format!("Dedup: removed {} (run reindex)", removed)
+        format!("Dedup: moved {} to trash", removed)
     } else {
         "Dedup: no changes".to_string()
     };

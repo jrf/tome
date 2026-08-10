@@ -1,3 +1,4 @@
+mod capture;
 mod config;
 mod fetch;
 mod index;
@@ -6,6 +7,7 @@ mod model;
 mod storage;
 mod theme;
 mod tui;
+mod urls;
 mod validate;
 
 use std::path::Path;
@@ -28,7 +30,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Fetch metadata for a URL and add it to the library
+    /// Save a URL and fetch metadata when available
     Add {
         /// URL to bookmark
         url: String,
@@ -41,13 +43,18 @@ enum Command {
         #[arg(short, long)]
         fix: bool,
     },
-    /// Delete a bookmark by directory slug
+    /// Move a bookmark to the library trash
     Rm {
         /// Bookmark directory slug (e.g. example-com-attention)
         slug: String,
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
+    },
+    /// Restore a bookmark from the library trash
+    Restore {
+        /// Bookmark directory slug in .trash
+        slug: String,
     },
 }
 
@@ -67,39 +74,30 @@ fn main() -> Result<()> {
         }
         Some(Command::Add { url }) => cmd_add(&library, &url),
         Some(Command::Reindex) => cmd_reindex(&library),
-        Some(Command::Validate { fix }) => validate::run(&library, fix),
+        Some(Command::Validate { fix }) => cmd_validate(&library, fix),
         Some(Command::Rm { slug, yes }) => cmd_rm(&library, &slug, yes),
+        Some(Command::Restore { slug }) => cmd_restore(&library, &slug),
     }
 }
 
 pub fn cmd_add(library: &Path, input: &str) -> Result<()> {
-    std::fs::create_dir_all(library)?;
-    ensure_library_gitignore(library);
-
-    let fetched = fetch::fetch_url(input)?;
-    let bookmark = fetched.bookmark;
-
-    let dir = storage::create_bookmark_dir(library, &bookmark)?;
-
-    if let Some(text) = fetch::extract_article(&fetched.html, &bookmark.url) {
-        let _ = std::fs::write(dir.join("article.txt"), text);
+    match capture::capture_url(library, input)? {
+        capture::CaptureResult::Existing { dir, bookmark } => {
+            println!("Already saved: {}", bookmark.title);
+            println!("  → {}", dir.display());
+        }
+        capture::CaptureResult::Created { dir, bookmark } => {
+            match capture::enrich_saved_bookmark(library, &dir) {
+                Ok(enriched) => println!("Added: {}", enriched.title),
+                Err(error) => {
+                    println!("Saved: {}", bookmark.url);
+                    eprintln!("Metadata fetch failed: {}", error);
+                }
+            }
+            println!("  → {}", dir.display());
+        }
     }
-
-    metadata::write_info(&dir, &bookmark)?;
-    index_bookmark(library, &dir, &bookmark);
-
-    println!("Added: {}", bookmark.title);
-    println!("  → {}", dir.display());
     Ok(())
-}
-
-fn ensure_library_gitignore(library: &Path) {
-    let path = library.join(".gitignore");
-    if path.exists() {
-        return;
-    }
-    let contents = ".cairn.db\n.cairn.db-wal\n.cairn.db-shm\n.trash/\n";
-    let _ = std::fs::write(path, contents);
 }
 
 pub fn index_bookmark(library: &Path, dir: &Path, bookmark: &crate::model::Bookmark) {
@@ -109,12 +107,13 @@ pub fn index_bookmark(library: &Path, dir: &Path, bookmark: &crate::model::Bookm
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        let _ = idx.upsert(&dir_name, bookmark);
+        let article = std::fs::read_to_string(dir.join("article.txt")).unwrap_or_default();
+        let _ = idx.upsert(&dir_name, bookmark, &article);
     }
 }
 
 fn cmd_rm(library: &Path, slug: &str, yes: bool) -> Result<()> {
-    let dir = library.join(slug);
+    let dir = storage::bookmark_dir(library, slug)?;
     if !dir.is_dir() || !dir.join("info.toml").exists() {
         anyhow::bail!("No bookmark found at {}", dir.display());
     }
@@ -125,7 +124,7 @@ fn cmd_rm(library: &Path, slug: &str, yes: bool) -> Result<()> {
 
     if !yes {
         use std::io::Write;
-        print!("Delete \"{}\" ({})? [y/N] ", title, slug);
+        print!("Move \"{}\" ({}) to trash? [y/N] ", title, slug);
         std::io::stdout().flush()?;
         let mut answer = String::new();
         std::io::stdin().read_line(&mut answer)?;
@@ -135,12 +134,22 @@ fn cmd_rm(library: &Path, slug: &str, yes: bool) -> Result<()> {
         }
     }
 
-    storage::delete_bookmark_dir(&dir)?;
+    let trashed = storage::trash_bookmark_dir(library, &dir)?;
     if let Ok(idx) = index::Index::open(library) {
         let _ = idx.delete(slug);
     }
 
-    println!("Deleted: {}", title);
+    println!("Moved to trash: {}", title);
+    println!("  → {}", trashed.display());
+    Ok(())
+}
+
+fn cmd_restore(library: &Path, slug: &str) -> Result<()> {
+    let dir = storage::restore_bookmark_dir(library, slug)?;
+    let bookmark = metadata::read_info(&dir)?;
+    index_bookmark(library, &dir, &bookmark);
+    println!("Restored: {}", bookmark.title);
+    println!("  → {}", dir.display());
     Ok(())
 }
 
@@ -148,5 +157,14 @@ fn cmd_reindex(library: &Path) -> Result<()> {
     let idx = index::Index::open(library)?;
     let count = idx.reindex(library)?;
     println!("Indexed {} bookmarks.", count);
+    Ok(())
+}
+
+fn cmd_validate(library: &Path, fix: bool) -> Result<()> {
+    validate::run(library, fix)?;
+    if fix {
+        let index = index::Index::open(library)?;
+        index.reindex(library)?;
+    }
     Ok(())
 }

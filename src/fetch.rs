@@ -27,6 +27,8 @@ pub fn fetch_url(input: &str) -> Result<FetchResult> {
         .get(&canonical)
         .send()
         .with_context(|| format!("Failed to fetch {}", canonical))?
+        .error_for_status()
+        .with_context(|| format!("Failed to fetch {}", canonical))?
         .text()
         .context("Failed to read response body")?;
 
@@ -147,14 +149,13 @@ fn extract_year(s: &str) -> Option<u16> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i + 4 <= bytes.len() {
-        if bytes[i..i + 4].iter().all(|b| b.is_ascii_digit()) {
-            if let Ok(year) = std::str::from_utf8(&bytes[i..i + 4])
+        if bytes[i..i + 4].iter().all(|b| b.is_ascii_digit())
+            && let Ok(year) = std::str::from_utf8(&bytes[i..i + 4])
                 .unwrap_or("")
                 .parse::<u16>()
-                && (1900..=2100).contains(&year)
-            {
-                return Some(year);
-            }
+            && (1900..=2100).contains(&year)
+        {
+            return Some(year);
         }
         i += 1;
     }

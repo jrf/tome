@@ -216,6 +216,7 @@ dependencies = [
  "serde",
  "shellexpand",
  "slug",
+ "tempfile",
  "toml",
  "url",
 ]
